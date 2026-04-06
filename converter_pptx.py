@@ -139,7 +139,10 @@ class PPTXConverter(BaseConverter):
         for shape in slide.shapes:
             if not shape.has_text_frame:
                 continue
-            ph = getattr(shape, "placeholder_format", None)
+            try:
+                ph = shape.placeholder_format
+            except ValueError:
+                ph = None
             if ph is not None and ph.type in _TITLE_PLACEHOLDER_TYPES:
                 title_text = shape.text_frame.text.strip()
                 break
@@ -150,7 +153,10 @@ class PPTXConverter(BaseConverter):
         # --- Process all shapes in order ---
         for shape in slide.shapes:
             # Skip the title placeholder (already handled above)
-            ph = getattr(shape, "placeholder_format", None)
+            try:
+                ph = shape.placeholder_format
+            except ValueError:
+                ph = None
             if ph is not None and ph.type in _TITLE_PLACEHOLDER_TYPES:
                 continue
 

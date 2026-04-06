@@ -56,7 +56,8 @@ logger = logging.getLogger(__name__)
 _MARGIN_FRACTION: float = 0.07
 
 # Maximum character count for a text span to be considered a page number.
-_PAGE_NUMBER_MAX_LEN: int = 6
+# Covers patterns up to "Page 9999 of 99999" (19 chars).
+_PAGE_NUMBER_MAX_LEN: int = 20
 
 # Regex that matches typical page-number text: digits, "Page N", "N of M", etc.
 _PAGE_NUMBER_RE = re.compile(

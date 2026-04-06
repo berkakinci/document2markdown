@@ -203,6 +203,11 @@ class DOCXConverter(BaseConverter):
                             blocks.append(lb)
                     for b in para_blocks:
                         if isinstance(b, _ListItem):
+                            # Flush if list type changes (bullet → numbered or vice versa)
+                            if list_acc.active and list_acc.ordered != b.ordered:
+                                lb = list_acc.flush()
+                                if lb:
+                                    blocks.append(lb)
                             list_acc.add(b.text, b.ordered)
                         else:
                             if list_acc.active:

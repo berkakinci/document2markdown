@@ -46,7 +46,9 @@ def _try_cairosvg(data: bytes, src_fmt: str) -> bytes | None:
     """Attempt SVG conversion via cairosvg.  Returns SVG bytes or None."""
     try:
         import cairosvg  # type: ignore[import]
-    except ImportError:
+    except (ImportError, OSError):
+        # ImportError: package not installed
+        # OSError: libcairo native library not found
         return None
 
     try:
@@ -71,7 +73,7 @@ def _try_cairosvg_raster(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
     """Attempt PNG rasterization via cairosvg.  Returns PNG bytes or None."""
     try:
         import cairosvg  # type: ignore[import]
-    except ImportError:
+    except (ImportError, OSError):
         return None
 
     try:
