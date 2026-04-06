@@ -1,10 +1,8 @@
 """VectorConverter — converts EMF, WMF, or EPS bytes to SVG (or PNG fallback).
 
 Conversion is attempted in order:
-  1. cairosvg  — preferred; pure-Python, returns SVG bytes directly.
-  2. Inkscape  — shell fallback via ``inkscape --export-type=svg``.
-  3. Rasterize — final fallback; renders to PNG at RASTER_DPI using Inkscape
-                 (``--export-type=png --export-dpi=<dpi>``) or cairosvg.
+  1. Inkscape → SVG  via ``inkscape --export-type=svg``
+  2. Inkscape → PNG  via ``inkscape --export-type=png --export-dpi=<dpi>``
 
 Returns a ``(bytes, extension)`` tuple where *extension* is ``".svg"`` or
 ``".png"``.  If every method fails a warning is logged to stderr and a
@@ -40,56 +38,6 @@ class VectorConversionError(Exception):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _try_cairosvg(data: bytes, src_fmt: str) -> bytes | None:
-    """Attempt SVG conversion via cairosvg.  Returns SVG bytes or None."""
-    try:
-        import cairosvg  # type: ignore[import]
-    except (ImportError, OSError):
-        # ImportError: package not installed
-        # OSError: libcairo native library not found
-        return None
-
-    try:
-        # cairosvg exposes format-specific entry points.
-        converter_fn = {
-            "eps": getattr(cairosvg, "eps2svg", None),
-            "svg": getattr(cairosvg, "svg2svg", None),
-        }.get(src_fmt)
-
-        if converter_fn is None:
-            # cairosvg does not natively handle EMF/WMF; skip.
-            return None
-
-        svg_bytes: bytes = converter_fn(bytestring=data)
-        return svg_bytes
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("cairosvg conversion failed: %s", exc)
-        return None
-
-
-def _try_cairosvg_raster(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
-    """Attempt PNG rasterization via cairosvg.  Returns PNG bytes or None."""
-    try:
-        import cairosvg  # type: ignore[import]
-    except (ImportError, OSError):
-        return None
-
-    try:
-        raster_fn = {
-            "eps": getattr(cairosvg, "eps2png", None),
-            "svg": getattr(cairosvg, "svg2png", None),
-        }.get(src_fmt)
-
-        if raster_fn is None:
-            return None
-
-        png_bytes: bytes = raster_fn(bytestring=data, dpi=dpi)
-        return png_bytes
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("cairosvg raster conversion failed: %s", exc)
-        return None
 
 
 def _inkscape_available() -> bool:
@@ -179,6 +127,8 @@ def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
 class VectorConverter:
     """Convert raw vector graphic bytes to SVG (preferred) or PNG (fallback).
 
+    Requires Inkscape to be installed and on PATH.
+
     Parameters
     ----------
     raster_dpi:
@@ -208,36 +158,22 @@ class VectorConverter:
         Raises
         ------
         VectorConversionError
-            If all three conversion methods fail.  No partial output is
-            written before raising.
+            If all conversion methods fail.  No partial output is written
+            before raising.
         """
         fmt = source_format.lower()
 
         # ------------------------------------------------------------------
-        # Step 1: cairosvg → SVG
-        # ------------------------------------------------------------------
-        svg_bytes = _try_cairosvg(data, fmt)
-        if svg_bytes is not None:
-            return svg_bytes, ".svg"
-
-        # ------------------------------------------------------------------
-        # Step 2: Inkscape → SVG
+        # Step 1: Inkscape → SVG
         # ------------------------------------------------------------------
         svg_bytes = _try_inkscape_svg(data, fmt)
         if svg_bytes is not None:
             return svg_bytes, ".svg"
 
         # ------------------------------------------------------------------
-        # Step 3a: Inkscape → PNG  (rasterization)
+        # Step 2: Inkscape → PNG  (rasterization fallback)
         # ------------------------------------------------------------------
         png_bytes = _try_inkscape_png(data, fmt, self.raster_dpi)
-        if png_bytes is not None:
-            return png_bytes, ".png"
-
-        # ------------------------------------------------------------------
-        # Step 3b: cairosvg → PNG  (rasterization, if Inkscape unavailable)
-        # ------------------------------------------------------------------
-        png_bytes = _try_cairosvg_raster(data, fmt, self.raster_dpi)
         if png_bytes is not None:
             return png_bytes, ".png"
 
@@ -255,5 +191,6 @@ class VectorConverter:
         )
         raise VectorConversionError(
             f"Could not convert vector graphic (format='{source_format}'): "
-            "cairosvg, Inkscape SVG, Inkscape PNG, and cairosvg raster all failed."
+            "Inkscape SVG and Inkscape PNG both failed. "
+            "Ensure Inkscape is installed and on PATH."
         )

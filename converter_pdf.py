@@ -421,9 +421,9 @@ class PDFConverter(BaseConverter):
             return None
 
         # Pass through VectorConverter for normalization.
-        # The SVG from PyMuPDF is already valid SVG, but VectorConverter may
-        # apply additional cleanup.  We treat it as source_format="svg" so
-        # cairosvg's svg2svg path is tried first.
+        # The SVG from PyMuPDF is already valid SVG, but we pass it through
+        # VectorConverter for consistency.  source_format="svg" is not a
+        # recognised EMF/WMF/EPS format so Inkscape will handle it if available.
         try:
             out_bytes, ext = self._vector.convert(svg_bytes, "svg")  # type: ignore[arg-type]
         except VectorConversionError:
