@@ -1,16 +1,24 @@
-"""VectorConverter — converts EMF, WMF, or EPS bytes to SVG (or PNG fallback).
+"""VectorConverter — converts EMF, WMF, or EPS bytes to SVG or PNG.
 
-Conversion is attempted in order:
-  1. Inkscape → SVG  via ``inkscape --export-type=svg``
-  2. Inkscape → PNG  via ``inkscape --export-type=png --export-dpi=<dpi>``
+Conversion strategy by format:
+
+  EMF / WMF
+    1. Inkscape → SVG  via ``inkscape --export-type=svg``
+    2. Inkscape → PNG  via ``inkscape --export-type=png --export-dpi=<dpi>``
+
+  EPS
+    1. Pillow (via Ghostscript) → PNG
+       Inkscape 1.4+ on macOS cannot open EPS from the CLI; Ghostscript
+       (``gs``) must be installed and Pillow uses it automatically.
 
 Returns a ``(bytes, extension)`` tuple where *extension* is ``".svg"`` or
 ``".png"``.  If every method fails a warning is logged to stderr and a
-:class:`VectorConversionError` is raised — no partial SVG is ever written.
+:class:`VectorConversionError` is raised — no partial output is ever written.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 import shutil
 import subprocess
@@ -19,12 +27,13 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from document2markdown.config import RASTER_DPI
+from document2markdown.config import INKSCAPE_PATH, RASTER_DPI
 
 logger = logging.getLogger(__name__)
 
 # Supported source format hints
 SourceFormat = Literal["emf", "wmf", "eps"]
+
 
 # ---------------------------------------------------------------------------
 # Public exception
@@ -36,12 +45,12 @@ class VectorConversionError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Internal helpers — Inkscape (EMF / WMF)
 # ---------------------------------------------------------------------------
 
 
 def _inkscape_available() -> bool:
-    return shutil.which("inkscape") is not None
+    return Path(INKSCAPE_PATH).is_file() or shutil.which(INKSCAPE_PATH) is not None
 
 
 def _try_inkscape_svg(data: bytes, src_fmt: str) -> bytes | None:
@@ -58,7 +67,7 @@ def _try_inkscape_svg(data: bytes, src_fmt: str) -> bytes | None:
         try:
             result = subprocess.run(
                 [
-                    "inkscape",
+                    INKSCAPE_PATH,
                     str(in_file),
                     "--export-type=svg",
                     f"--export-filename={out_file}",
@@ -95,7 +104,7 @@ def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
         try:
             result = subprocess.run(
                 [
-                    "inkscape",
+                    INKSCAPE_PATH,
                     str(in_file),
                     "--export-type=png",
                     f"--export-dpi={dpi}",
@@ -120,6 +129,49 @@ def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers — Pillow / Ghostscript (EPS)
+# ---------------------------------------------------------------------------
+
+
+def _ghostscript_available() -> bool:
+    """Return True if ``gs`` is on PATH (required by Pillow for EPS)."""
+    return shutil.which("gs") is not None
+
+
+def _try_pillow_eps_png(data: bytes, dpi: int) -> bytes | None:
+    """Rasterize EPS to PNG via Pillow (which shells out to Ghostscript).
+
+    Returns PNG bytes, or None if Pillow or Ghostscript is unavailable or
+    the conversion fails.
+    """
+    if not _ghostscript_available():
+        logger.debug("Ghostscript (gs) not found — skipping Pillow EPS conversion")
+        return None
+
+    try:
+        from PIL import Image  # type: ignore[import]
+    except ImportError:
+        logger.debug("Pillow not installed — skipping EPS conversion")
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            in_file = Path(tmp) / "input.eps"
+            in_file.write_bytes(data)
+
+            img = Image.open(in_file)
+            img.load()  # triggers gs subprocess
+
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+
+    except Exception as exc:
+        logger.debug("Pillow EPS→PNG conversion failed: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Public interface
 # ---------------------------------------------------------------------------
 
@@ -127,12 +179,13 @@ def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
 class VectorConverter:
     """Convert raw vector graphic bytes to SVG (preferred) or PNG (fallback).
 
-    Requires Inkscape to be installed and on PATH.
+    - EMF / WMF: converted via Inkscape (must be installed).
+    - EPS: rasterized to PNG via Pillow + Ghostscript (``gs`` must be on PATH).
 
     Parameters
     ----------
     raster_dpi:
-        DPI used when rasterizing as a last resort.  Defaults to
+        DPI used when rasterizing.  Defaults to
         :data:`~document2markdown.config.RASTER_DPI`.
     """
 
@@ -163,19 +216,26 @@ class VectorConverter:
         """
         fmt = source_format.lower()
 
-        # ------------------------------------------------------------------
-        # Step 1: Inkscape → SVG
-        # ------------------------------------------------------------------
-        svg_bytes = _try_inkscape_svg(data, fmt)
-        if svg_bytes is not None:
-            return svg_bytes, ".svg"
+        if fmt == "eps":
+            # ------------------------------------------------------------------
+            # EPS: Pillow + Ghostscript → PNG
+            # Inkscape 1.4+ on macOS cannot open EPS from the CLI.
+            # ------------------------------------------------------------------
+            png_bytes = _try_pillow_eps_png(data, self.raster_dpi)
+            if png_bytes is not None:
+                return png_bytes, ".png"
 
-        # ------------------------------------------------------------------
-        # Step 2: Inkscape → PNG  (rasterization fallback)
-        # ------------------------------------------------------------------
-        png_bytes = _try_inkscape_png(data, fmt, self.raster_dpi)
-        if png_bytes is not None:
-            return png_bytes, ".png"
+        else:
+            # ------------------------------------------------------------------
+            # EMF / WMF: Inkscape → SVG (preferred), then PNG fallback
+            # ------------------------------------------------------------------
+            svg_bytes = _try_inkscape_svg(data, fmt)
+            if svg_bytes is not None:
+                return svg_bytes, ".svg"
+
+            png_bytes = _try_inkscape_png(data, fmt, self.raster_dpi)
+            if png_bytes is not None:
+                return png_bytes, ".png"
 
         # ------------------------------------------------------------------
         # All methods failed
@@ -191,6 +251,6 @@ class VectorConverter:
         )
         raise VectorConversionError(
             f"Could not convert vector graphic (format='{source_format}'): "
-            "Inkscape SVG and Inkscape PNG both failed. "
-            "Ensure Inkscape is installed and on PATH."
+            "EMF/WMF require Inkscape on PATH; "
+            "EPS requires Ghostscript (gs) and Pillow."
         )
