@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "document2markdown"
+version = "0.1.0"
+description = "Convert PDF, DOCX, HTML, PPTX, and TXT documents to Markdown"
+requires-python = ">=3.12"
+dependencies = [
+    "PyMuPDF",
+    "python-docx",
+    "beautifulsoup4",
+    "markdownify",
+    "python-pptx",
+    "python-magic",
+    "hypothesis",
+]
+
+[project.optional-dependencies]
+dev = ["hypothesis"]
+
+[project.scripts]
+doc2md = "doc2md:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["document2markdown*"]

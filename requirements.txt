@@ -1,0 +1,8 @@
+PyMuPDF
+python-docx
+beautifulsoup4
+markdownify
+python-pptx
+python-magic
+hypothesis
+Pillow
