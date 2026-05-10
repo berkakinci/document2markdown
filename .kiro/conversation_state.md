@@ -137,3 +137,18 @@ All under `tests/`:
   - Skip-if-newer: skip conversion when output mtime > source mtime; `--force` flag overrides
   - Configurable directory names: `output_dir_name` and `assets_dir_name` via config file or constructor params (constructor wins)
   - Requirement 3 now has 13 acceptance criteria; design has 12 correctness properties
+- 2026-05-10: Output handling implementation complete (tasks 15–23): default dir, mirroring, skip-if-newer, --force, configurable via config.py constants
+- 2026-05-10: Removed toml config overhead — simplified to direct constant reads from config.py (toml version preserved in git stash)
+- 2026-05-10: Spec audit: fixed 9 deviations (stale PDF docs, return type, functional API force param, doubled ERROR prefix, requirements overconstraints)
+- 2026-05-10: Real-file test on test_real/ (103 documents converted successfully across PDF/DOCX/PPTX)
+- 2026-05-10: Fixes from real-file run: line-buffered stdout, filter unsupported extensions in directory mode, deduplicated ERROR prefix in exceptions
+- 2026-05-10: Investigated nested `Exports - Conversions/Exports - Conversions/` in `test_real/` — suspected bug in `convert_directory`, but could not reproduce with current code
+- 2026-05-10: Created `test_real_subset/` (20 files: 9 PDF, 5 DOCX, 6 PPTX) + `test_real_subset_pristine/` backup for fast iterative testing
+- 2026-05-10: Expanded subset with deeper directory structure (Papers/Ken Must Reads/, Papers/QCM Patents/, Papers/RSI Examples/, Thesis/Pictures/, AVoIP next-gen vision/); `test_real_subset_pristinemore/` backup
+- 2026-05-10: Ran 3 scenarios on subset (first run, skip-if-newer, --force) — no nesting produced in any case; directory mirroring works at all depths
+- 2026-05-10: Added unsupported files (.xlsx, .svg, .drawio, .jpg, .png) to subset — correctly filtered out by `convert_directory`, no errors, no empty output dirs created
+- 2026-05-10: Edge case confirmed: filename with literal double quotes (`"full_case parallel_case", the Evil Twins of Verilog Synthesis.pdf`) converts cleanly, no escaping issues
+- 2026-05-10: Conclusion: nested output in `test_real/` was from earlier dev iteration (pre-extension-filter) or dirty invocation params; current implementation is correct
+- 2026-05-10: **document2markdown deemed ready for real conversions** — all testing complete, no blocking issues
+- 2026-05-10: Added top-level README.md covering OO, functional, and CLI usage; supported formats table
+- 2026-05-10: Multi-file mode experiment — confirmed no nested outputs; each source gets `Exports - Conversions/` alongside its parent directory (mixed-mode runs do scatter output dirs but never nest)
