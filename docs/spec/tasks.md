@@ -261,3 +261,154 @@ Implement `doc2md.py`, a Python CLI script that converts PDF, DOCX, HTML, PPTX, 
 - Property 5 (heading round-trip) is implemented in three files: `test_property_html.py`, `test_property_docx.py`, and `test_property_headings.py` (combined)
 - Properties 1 and 3 are both implemented in `test_property_formats.py`
 - Property 9 (vector → SVG/PNG) is implemented in `test_property_vector.py` (EMF→SVG and EPS→PNG paths)
+
+---
+
+## Output Handling Enhancements (Requirement 3 update, 2026-05-10)
+
+Implement default output directory, directory mirroring, skip-if-newer, `--force`, and configurable directory names. Surgical approach: path resolution stays in the orchestration layer (utils/CLI); the writer's interface changes minimally.
+
+**Design principle:** The writer already receives a resolved `output_dir: Path`. That pattern stays. New logic (default dir name, mirroring, skip-if-newer) lives in `utils.py` and `doc2md.py` — the layers that already decide *where* to write. The writer gains only `force` and timestamp checking. `EMBEDDED_DIR` in config.py keeps its current role.
+
+- [ ] 15. Config constants and `force` on Converter
+  - [ ] 15.1 Update `document2markdown/config.py`
+    - Add `OUTPUT_DIR_NAME: str = "Exports - Conversions"`
+    - Keep `EMBEDDED_DIR` as-is (no rename — avoids churn in existing tests)
+    - _Requirements: 3.3, 3.9_
+
+  - [ ] 15.2 Add `force: bool = False` param to `Converter.__init__` in `api.py`
+    - Store as `self._force`; pass to `Document` construction
+    - No other new params on Converter — dir name resolution stays in utils/CLI
+    - _Requirements: 3.6_
+
+  - [ ] 15.3 Add `force` and `skipped` to `Document` in `document.py`
+    - Accept `force: bool` in constructor (from Converter)
+    - Add `self._skipped: bool = False` with a `@property skipped`
+    - `Document.save()` passes `force` to `OutputWriter.write()`; sets `self._skipped` from return value
+    - _Requirements: 3.5, 3.6_
+
+- [ ] 16. Skip-if-newer logic in the writer
+  - [ ] 16.1 Add timestamp check to `OutputWriter.write()` in `writer.py`
+    - New param: `force: bool = False`
+    - Before writing `.md`: if target exists, compare `target.stat().st_mtime` vs `source_path.stat().st_mtime`
+      - target newer and not force → skip, print `INFO: {path}: up-to-date, skipping` to stderr, return `(md_path, skipped=True)`
+      - target older/equal and not force → overwrite with existing warning (already implemented)
+      - force → skip timestamp check entirely
+    - Change return type to `tuple[Path, bool]` (path, skipped) — or add a `skipped` field to a small result dataclass
+    - No changes to `_write_assets` or `asset_url_path` — `EMBEDDED_DIR` usage unchanged
+    - _Requirements: 3.5, 3.6, 3.7_
+
+  - [ ]* 16.2 Write property test — Property 11: Skip-if-newer timestamp logic
+    - **Validates: Requirements 3.5, 3.6**
+
+  - [ ]* 16.3 Write unit tests for skip-if-newer
+    - Target newer → skip + informational stderr
+    - Target older → overwrite + warning stderr
+    - Target equal mtime → overwrite + warning stderr
+    - `force=True` → always overwrite
+    - _Requirements: 3.5, 3.6, 3.7_
+
+- [ ] 17. Default output directory (orchestration layer)
+  - [ ] 17.1 Update `Document.save()` default path logic
+    - Current: `output_dir` defaults to `source_path.parent`
+    - New: when `output_dir is None`, compute `source_path.parent / OUTPUT_DIR_NAME`
+    - Import `OUTPUT_DIR_NAME` from config (same pattern as `EMBEDDED_DIR`)
+    - Pass resolved path to `writer.write(output_dir=...)`
+    - _Requirements: 3.3, 3.8, 3.12_
+
+  - [ ]* 17.2 Write unit tests for default output directory
+    - No explicit output → `.md` written to `{source_parent}/Exports - Conversions/`
+    - Directory auto-created
+    - Relative to source, not CWD (test by running from a different cwd)
+    - _Requirements: 3.3, 3.8, 3.12_
+
+- [ ] 18. Checkpoint — Ensure existing tests still pass + new tests pass
+
+- [ ] 19. Directory structure mirroring (utils layer)
+  - [ ] 19.1 Update `convert_directory` in `document2markdown/utils.py`
+    - Compute `relative = source_path.relative_to(traversed_root)`
+    - Resolve output dir: `traversed_root / OUTPUT_DIR_NAME / relative.parent`
+    - Pass resolved `output_dir` to `Document.save(output=resolved_dir)` — writer sees a concrete Path, no new params needed
+    - Each file gets its own `EMBEDDED_DIR/` alongside its `.md` (already the writer's behavior when given a per-file output_dir)
+    - _Requirements: 3.4, 3.8, 3.9_
+
+  - [ ]* 19.2 Write unit tests for directory mirroring
+    - `docs/deeper/file.pdf` → `docs/Exports - Conversions/deeper/file.md`
+    - `md_embedded/` alongside each `.md` at its depth
+    - Missing intermediate dirs created (writer already does `mkdir(parents=True)`)
+    - _Requirements: 3.4, 3.8, 3.9_
+
+  - [ ]* 19.3 Write property test — Property 8: Output path derivation with directory mirroring
+    - **Validates: Requirements 3.3, 3.4, 3.8, 3.9, 3.12**
+
+- [ ] 20. CLI: `--force` flag and `BatchSummary.skipped`
+  - [ ] 20.1 Add `--force` to argparse in `doc2md.py`
+    - Pass `force=True` to `Converter` constructor
+    - _Requirements: 3.6_
+
+  - [ ] 20.2 Add `skipped` count to batch summary in `doc2md.py`
+    - After each conversion, check `doc.skipped`; increment skipped counter
+    - Print in summary line: `N converted, M skipped, K failed`
+    - _Requirements: 3.5, 3.6_
+
+  - [ ] 20.3 Wire default output dir into CLI (no `--output` case)
+    - When `--output` not provided and input is a directory → use `convert_directory` with mirroring
+    - When `--output` not provided and input is file(s) → `Document.save()` uses its new default (task 17.1)
+    - When `--output` provided → pass as explicit `output_dir` (existing behavior)
+    - _Requirements: 3.3, 3.4_
+
+  - [ ]* 20.4 Write unit tests for CLI changes
+    - `--force` parsed and passed
+    - Skipped count in summary
+    - No `--output` → default dir used
+    - _Requirements: 3.5, 3.6_
+
+- [ ] 21. Config file support for directory names
+  - [ ] 21.1 Add `load_config()` to `document2markdown/config.py`
+    - Read `[tool.document2markdown]` from `pyproject.toml` (if present in CWD or parents)
+    - Return dict with `output_dir_name` and `assets_dir_name` (falling back to module constants)
+    - _Requirements: 3.10_
+
+  - [ ] 21.2 Wire config into `Document.save()` and `convert_directory`
+    - On first call, load config once; use `output_dir_name` from config when computing default paths
+    - Constructor/explicit params still override (Converter stores explicit values; if set, they win)
+    - `EMBEDDED_DIR` in writer stays as-is for now — config override for assets dir is a stretch goal
+    - _Requirements: 3.10_
+
+  - [ ]* 21.3 Write property test — Property 12: Configurable directory names with precedence
+    - **Validates: Requirements 3.10**
+
+  - [ ]* 21.4 Write unit tests for config loading and precedence
+    - Config values used when no explicit override
+    - Explicit override wins
+    - Missing config → built-in defaults
+    - _Requirements: 3.10_
+
+- [ ] 22. Integration tests and regression verification
+  - [ ]* 22.1 Write integration tests for full output handling flow
+    - Single file no `--output` → `Exports - Conversions/` relative to source
+    - Directory → mirrored structure
+    - Skip-if-newer → newer output skipped
+    - `--force` → reconverts
+    - All existing 200+ tests still pass
+    - _Requirements: 3.3, 3.4, 3.5, 3.6, 3.8, 3.9, 3.10_
+
+- [ ] 23. Final checkpoint — All tests pass (existing + new)
+
+## Task Dependency Graph (Tasks 15–23)
+
+```json
+{
+  "waves": [
+    { "id": 0, "tasks": ["15.1"] },
+    { "id": 1, "tasks": ["15.2", "15.3"] },
+    { "id": 2, "tasks": ["16.1"] },
+    { "id": 3, "tasks": ["16.2", "16.3", "17.1"] },
+    { "id": 4, "tasks": ["17.2", "18"] },
+    { "id": 5, "tasks": ["19.1", "20.1", "20.2", "20.3"] },
+    { "id": 6, "tasks": ["19.2", "19.3", "20.4", "21.1"] },
+    { "id": 7, "tasks": ["21.2", "21.3", "21.4"] },
+    { "id": 8, "tasks": ["22.1", "23"] }
+  ]
+}
+```

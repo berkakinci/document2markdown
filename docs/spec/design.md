@@ -263,27 +263,49 @@ This allows alternative renderers (e.g. `ObsidianMarkdownRenderer`, `PlainTextRe
 
 ### Output Writer (`document2markdown/writer.py`)
 
-Serializes a rendered string and embedded assets to disk:
+Serializes a rendered string and embedded assets to disk. The writer's interface is intentionally minimal — it receives a **resolved `output_dir: Path`** from its caller and writes there. Path resolution logic (default directory names, mirroring) lives in the orchestration layer (`Document.save()`, `utils.convert_directory()`, CLI), not in the writer.
+
 - Accepts a `BaseRenderer` instance; calls `renderer.render(result)` to produce the output string
-- Writes output string to `{base_name}.md`
-- Writes embedded assets to `{assets_dir_name}/{base_name}_{serial:04d}{ext}` (default `assets_dir_name`: `md_embedded`)
+- Writes output string to `{output_dir}/{base_name}.md`
+- Writes embedded assets to `{output_dir}/{EMBEDDED_DIR}/{base_name}_{serial:04d}{ext}` — uses `EMBEDDED_DIR` constant from `config.py` directly (not passed as a parameter)
 - Generates URL-encoded relative paths for all image/link references
-- Creates output directories as needed
+- Creates output directories as needed (`mkdir(parents=True)`)
 
-#### Default Output Directory
+#### Skip-if-Newer Logic
 
-When `--output` is not provided:
-- **Single-file conversion**: output goes to `{source_parent}/{output_dir_name}/` (default `output_dir_name`: `Exports - Conversions`)
-- **Directory conversion**: output goes to `{traversed_directory_root}/{output_dir_name}/`
-- The output directory is **always relative to the source** — it is NEVER relative to the current working directory (CWD). Regardless of where the script is invoked from, the output location is determined solely by the source path.
-- The output directory is created **once per invocation**, not per source file.
+The writer's `write()` method accepts a `force: bool = False` parameter. Before writing each output file:
+1. If the target `.md` file exists AND its `mtime` > source file's `mtime` AND not `force` → **skip**, print informational message to stderr, return `(md_path, skipped=True)`.
+2. If the target `.md` file exists AND its `mtime` ≤ source file's `mtime` → **overwrite**, print warning to stderr (existing behavior).
+3. If the target `.md` file does not exist → write normally.
+4. If `force` is `True` → skip timestamp check entirely, always write.
 
-#### Directory Structure Mirroring
+The decision is based **solely on filesystem modification timestamps** — no content or format validation of the existing file is performed.
 
-When converting a directory tree, the output directory mirrors the subdirectory structure of the source tree:
-- Source files in subdirectories of the traversed root produce output in corresponding subdirectories within `{output_dir_name}/`.
-- The relative path from the traversed root to each source file is preserved in the output tree.
-- The `{assets_dir_name}/` directory (default: `md_embedded/`) lives alongside each `.md` file at whatever depth it appears — it is NOT a single shared directory at the output root.
+The `write()` return type changes from `Path` to `tuple[Path, bool]` — `(md_path, skipped)`.
+
+#### Default Output Directory (resolved by `Document.save()`)
+
+The writer does NOT compute the default output directory — it just receives `output_dir`. The default path logic lives in `Document.save()`:
+
+When `Document.save(output=None)` is called and no explicit `output_dir` was set on the parent `Converter`:
+- **Single-file conversion**: `output_dir = source_path.parent / OUTPUT_DIR_NAME`
+- The output directory is **always relative to the source** — NEVER relative to CWD.
+
+`OUTPUT_DIR_NAME` is a constant in `config.py` (default: `"Exports - Conversions"`), read by `Document.save()` the same way the writer reads `EMBEDDED_DIR`.
+
+#### Directory Structure Mirroring (resolved by `convert_directory()`)
+
+Mirroring logic lives in `utils.convert_directory()`, not in the writer. The utility computes a per-file `output_dir` and passes it to `Document.save(output=resolved_dir)`:
+
+```python
+relative = source_path.relative_to(traversed_root)
+output_dir = traversed_root / OUTPUT_DIR_NAME / relative.parent
+# Writer receives this resolved path — writes {output_dir}/{basename}.md
+```
+
+The writer's existing behavior (write `.md` + `EMBEDDED_DIR/` under the given `output_dir`) naturally produces the correct mirrored structure:
+- Source files in subdirectories produce output in corresponding subdirectories.
+- `EMBEDDED_DIR/` (default: `md_embedded/`) lives alongside each `.md` at its depth — NOT a single shared directory at the output root.
 
 Example: converting `docs/` containing `docs/doc.doc`, `docs/pdf.pdf`, and `docs/deeper/pdftoo.pdf`:
 ```
@@ -302,30 +324,14 @@ docs/
         pdftoo_0001.png
 ```
 
-The mirroring logic computes: `output_path = traversed_root / output_dir_name / relative_path_from_root.with_suffix(".md")`
-
-#### Skip-if-Newer Logic
-
-Before writing each output file, the writer checks timestamps:
-1. If the target `.md` file exists AND its `mtime` > source file's `mtime` → **skip** conversion, print informational message to stderr.
-2. If the target `.md` file exists AND its `mtime` ≤ source file's `mtime` → **overwrite**, print warning to stderr.
-3. If the target `.md` file does not exist → write normally.
-
-The decision is based **solely on filesystem modification timestamps** — no content or format validation of the existing file is performed.
-
-#### `--force` Flag
-
-When `--force` is set, the skip-if-newer check is bypassed entirely. All files are reconverted regardless of timestamps.
-
 #### Configurable Directory Names
 
-Both the output directory name and the assets subdirectory name are configurable:
-- **Default output directory name**: `Exports - Conversions`
-- **Default assets subdirectory name**: `md_embedded`
-- Values can be set via:
-  1. Configuration file (e.g. `pyproject.toml` or a dedicated config file)
-  2. Constructor parameters on the `Converter` class (`output_dir_name`, `assets_dir_name`)
-- **Precedence**: Constructor parameters > config file values > built-in defaults
+Both directory names are configurable via `config.py` constants and an optional config file:
+- **`OUTPUT_DIR_NAME`**: default `"Exports - Conversions"` — used by `Document.save()` and `convert_directory()`
+- **`EMBEDDED_DIR`**: default `"md_embedded"` — used by `OutputWriter` directly (unchanged from current implementation)
+- Values can be overridden via `pyproject.toml [tool.document2markdown]` section
+- A `load_config()` function in `config.py` reads the config file and returns effective values
+- **Precedence**: config file values > built-in constants (for directory names); explicit `output_dir` passed to `Document.save()` always wins over the default name
 
 ### Error Reporter (`document2markdown/errors.py`)
 
@@ -345,8 +351,6 @@ class Converter:
     def __init__(
         self,
         output_dir: Path | None = None,
-        output_dir_name: str = "Exports - Conversions",
-        assets_dir_name: str = "md_embedded",
         raster_dpi: int = RASTER_DPI,
         force: bool = False,
         verbose: bool = False,
@@ -366,10 +370,11 @@ class Document:
 ```
 
 - `Converter` converts one file per call. For batch and directory convenience, use `document2markdown.utils`.
-- `output_dir_name` and `assets_dir_name` override config-file values when provided explicitly.
-- `force=True` bypasses skip-if-newer logic for all files processed by this instance.
-- `Document.save()` with no argument writes to the default output directory (`{output_dir_name}/` relative to the source file's parent).
+- `force=True` bypasses skip-if-newer logic for all files processed by this instance. Passed through to `Document` and then to `OutputWriter.write()`.
+- `output_dir` is an explicit output directory override. When set, `Document.save()` uses it directly (no default directory name logic).
+- `Document.save()` with no argument and no `output_dir` on the parent Converter writes to `{source_parent}/{OUTPUT_DIR_NAME}/` (reading `OUTPUT_DIR_NAME` from `config.py`).
 - `Document.skipped` is `True` when the output file was newer than the source and `force` was not set.
+- Directory name configuration (`OUTPUT_DIR_NAME`, `EMBEDDED_DIR`) lives in `config.py` constants, overridable via `pyproject.toml`. These are NOT passed as constructor parameters — the surgical approach keeps the Converter interface minimal.
 - `doc2md.py` uses `Converter` via the utilities layer; it contains no duplicated pipeline logic.
 
 #### Functional API
@@ -401,11 +406,12 @@ def convert_directory(directory: Path, converter: Converter, pattern: str = "*")
 
 - Each file is processed independently; failures are captured as exceptions in the result list rather than raised.
 - The CLI uses these functions for multi-file and directory support.
-- `convert_directory` computes the relative path of each source file from the traversed root (`directory`) and passes it to the writer so that the output mirrors the source tree structure. Specifically:
+- `convert_directory` is the **orchestration point for directory mirroring**. It computes a resolved `output_dir` per file and passes it to `Document.save(output=resolved_dir)`. The writer never needs to know about mirroring — it just writes to the path it's given:
   ```python
   relative = source_path.relative_to(directory)
-  output_path = directory / output_dir_name / relative.with_suffix(".md")
-  assets_path = output_path.parent / assets_dir_name
+  output_dir = directory / OUTPUT_DIR_NAME / relative.parent
+  doc.save(output=output_dir)
+  # Writer produces: output_dir/{basename}.md + output_dir/EMBEDDED_DIR/{basename}_0001.ext
   ```
   This ensures that `docs/deeper/pdftoo.pdf` produces `docs/Exports - Conversions/deeper/pdftoo.md` with assets at `docs/Exports - Conversions/deeper/md_embedded/`.
 
@@ -557,7 +563,7 @@ Both `Exports - Conversions` and `md_embedded` are configurable via config file 
 
 ### Property 12: Configurable directory names with precedence
 
-*For any* pair of directory name values (output_dir_name, assets_dir_name) provided via both a configuration file and constructor parameters, the converter SHALL use the constructor parameter values in all output paths. When only config file values are provided, those SHALL be used. When neither is provided, the built-in defaults (`Exports - Conversions`, `md_embedded`) SHALL be used.
+*For any* directory name values (`OUTPUT_DIR_NAME`, `EMBEDDED_DIR`) specified in a `pyproject.toml` `[tool.document2markdown]` section, the converter SHALL use the config-file values in all output paths. When no config file is present, the built-in constants (`Exports - Conversions`, `md_embedded`) SHALL be used. When an explicit `output_dir` Path is passed to `Document.save()`, it SHALL always take precedence over any configured default directory name.
 
 **Validates: Requirements 3.9, 3.10**
 
