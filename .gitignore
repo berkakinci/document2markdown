@@ -1,0 +1,17 @@
+# Test data (real documents for manual testing)
+test_real/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Coverage
+.coverage
+htmlcov/
+
+# Hypothesis
+.hypothesis/
+
+# pytest
+.pytest_cache/

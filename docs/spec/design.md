@@ -146,7 +146,7 @@ class BaseConverter(ABC):
 | `PDFConverter` | `PyMuPDF` (recommended) | Extracts text blocks, tables, and images into IR. PyMuPDF is recommended over `pdfplumber` primarily due to vector graphic extraction: `page.get_drawings()` returns structured path data for both inline content-stream vectors and Form XObjects, and `page.get_svg_image(clip=rect)` can export any page region as SVG. `pdfplumber` does not expose this capability. PyMuPDF is also faster on complex/large PDFs. Tradeoff: AGPL license (vs. MIT for `pdfplumber`); acceptable for internal tooling. Neither library's Markdown output is used — all extraction feeds directly into the IR. |
 | `DOCXConverter` | `python-docx` + `Inkscape` | Walks document XML; maps styles to heading levels; converts embedded EMF/WMF drawing objects to SVG |
 | `HTMLConverter` | `BeautifulSoup4` + `markdownify` | Parses DOM; maps tags to Markdown equivalents |
-| `PPTXConverter` | `python-pptx` + `Inkscape` | Iterates slides in order; title → H2, body → paragraphs; converts embedded EMF/WMF/EPS shapes to SVG |
+| `PPTXConverter` | `python-pptx` + `Inkscape` / `Pillow` | Iterates slides in order; title → H2, body → paragraphs; converts embedded EMF/WMF to SVG via Inkscape, EPS to PNG via Pillow+Ghostscript |
 | `TXTConverter` | stdlib only | Wraps content in fenced code block or plain paragraphs |
 
 ### PDF Vector Detection and Extraction
@@ -172,12 +172,18 @@ The PDF object hierarchy (catalog → pages → resources → XObjects) can enum
 
 ### VectorConverter (`document2markdown/converter_vector.py`)
 
-Vector graphic conversion is handled by a shared `VectorConverter` utility (`document2markdown/converter_vector.py`) called by any converter that encounters an embedded vector object. It accepts raw bytes plus a source format hint (EMF, WMF, EPS) and attempts conversion in order:
+Vector graphic conversion is handled by a shared `VectorConverter` utility (`document2markdown/converter_vector.py`) called by any converter that encounters an embedded vector object. It accepts raw bytes plus a source format hint (EMF, WMF, EPS) and attempts conversion using format-specific strategies:
 
-1. **Inkscape** (`--export-type=svg`) — preferred; converts EMF, WMF, EPS to SVG via shell call.
-2. **Inkscape PNG raster** (`--export-type=png --export-dpi=<dpi>`) — fallback if SVG export fails. DPI is configurable via `RASTER_DPI` in `config.py`, default 300. The resulting asset has a `.png` extension and is saved to `md_embedded/` like any other embedded asset.
+**EMF / WMF:**
+1. **Inkscape SVG** (`--export-type=svg`) — preferred; converts to SVG via shell call.
+2. **Inkscape PNG raster** (`--export-type=png --export-dpi=<dpi>`) — fallback if SVG export fails.
 
-If both methods fail, a warning is logged and an `UnsupportedBlock` note is inserted in the IR instead.
+**EPS:**
+1. **Pillow + Ghostscript** → PNG — Inkscape 1.4+ on macOS cannot open EPS from the CLI, so EPS is rasterized to PNG via Pillow (which shells out to `gs`). Ghostscript must be installed.
+
+DPI is configurable via `RASTER_DPI` in `config.py`, default 300. PNG assets are saved to `md_embedded/` like any other embedded asset.
+
+If all methods fail for a given format, a warning is logged and an `UnsupportedBlock` note is inserted in the IR instead.
 
 ### Intermediate Representation (`document2markdown/document_model.py`)
 
@@ -403,9 +409,11 @@ Paths in the Markdown use URL encoding:
 
 **Validates: Requirements 3.2, 3.8**
 
-### Property 9: Vector graphics are extracted as SVG
+### Property 9: Vector graphics are extracted as SVG or PNG
 
-*For any* source document containing embedded vector graphics (EMF, WMF, EPS, or native drawing objects), every extracted asset that originated from a vector graphic SHALL have a `.svg` extension and its content SHALL be valid SVG (parseable XML with an `<svg` root element).
+*For any* source document containing embedded vector graphics (EMF, WMF, EPS, or native drawing objects):
+- EMF/WMF assets SHALL have a `.svg` extension and content SHALL be valid SVG (parseable XML with an `<svg` root element).
+- EPS assets SHALL have a `.png` extension and content SHALL be a valid PNG (magic bytes `\x89PNG\r\n\x1a\n`).
 
 **Validates: Requirements 2.8**
 
@@ -471,7 +479,7 @@ Using `hypothesis` (Python), minimum 100 iterations per property:
 - **Property 6** — Generate documents with embedded images; assert all `![...]` references use relative, URL-encoded paths
 - **Property 7** — Generate batches of N paths where a random subset are invalid; assert summary totals equal N and succeeded + failed = N
 - **Property 8** — Generate random source paths and output directories; assert output path equals `{output_dir}/{stem}.md` exactly
-- **Property 9** — Generate or fixture DOCX/PPTX documents with embedded EMF/WMF objects; assert every extracted asset from a vector source has extension `.svg` and content parseable as XML with an `<svg` root
+- **Property 9** — Generate or fixture DOCX/PPTX documents with embedded EMF/WMF/EPS objects; assert EMF/WMF assets have extension `.svg` with valid XML `<svg` root, and EPS assets have extension `.png` with valid PNG header
 - **Property 10** — Generate (extension, MIME) pairs where extension maps to one supported format and MIME maps to a different supported format; assert dispatcher rejects the file, exits non-zero, and stderr contains both type identifiers
 
 Each test is tagged:

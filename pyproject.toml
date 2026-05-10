@@ -14,7 +14,7 @@ dependencies = [
     "markdownify",
     "python-pptx",
     "python-magic",
-    "hypothesis",
+    "Pillow",
 ]
 
 [project.optional-dependencies]

@@ -260,4 +260,4 @@ Implement `doc2md.py`, a Python CLI script that converts PDF, DOCX, HTML, PPTX, 
 - `RASTER_DPI` default (300) is set in `document2markdown/config.py` and used as the fallback rasterization resolution
 - Property 5 (heading round-trip) is implemented in three files: `test_property_html.py`, `test_property_docx.py`, and `test_property_headings.py` (combined)
 - Properties 1 and 3 are both implemented in `test_property_formats.py`
-- Property 9 (vector → SVG) has no property test file; only unit tests in `test_unit_vector.py`
+- Property 9 (vector → SVG/PNG) is implemented in `test_property_vector.py` (EMF→SVG and EPS→PNG paths)

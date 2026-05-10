@@ -267,12 +267,12 @@ class TestExtractVectorClustersFailures:
         assert result == []
         assert any("get_drawings" in w for w in warnings)
 
-    def test_get_svg_image_exception_adds_warning(self, tmp_path):
-        """If get_svg_image() raises, a warning is added and None returned."""
+    def test_get_pixmap_exception_adds_warning(self, tmp_path):
+        """If get_pixmap() raises, a warning is added and None returned."""
         from unittest.mock import MagicMock
         converter = PDFConverter()
         page = MagicMock()
-        page.get_svg_image.side_effect = RuntimeError("svg fail")
+        page.get_pixmap.side_effect = RuntimeError("pixmap fail")
         page.number = 0
         warnings = []
         import fitz
@@ -280,7 +280,7 @@ class TestExtractVectorClustersFailures:
             page, fitz.Rect(0, 0, 100, 100), [], warnings
         )
         assert result is None
-        assert any("get_svg_image" in w for w in warnings)
+        assert any("get_pixmap" in w for w in warnings)
 
     def test_tiny_cluster_skipped(self, tmp_path):
         """Clusters below _MIN_VECTOR_AREA should not produce image blocks."""

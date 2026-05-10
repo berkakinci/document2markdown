@@ -5,7 +5,7 @@
 
 ## Status
 - Implementation complete — all 14 required tasks done, all optional test tasks done
-- 205 tests passing (196 unit/property + 9 live), 0 failures
+- 204 unit/property tests + 8 live tests passing, 0 failures
 - Overall source coverage: 85%
 - `converter_vector.py` at 100% coverage
 
@@ -43,6 +43,21 @@
 ## Known Limitations
 - DOCX interrupted ordered lists: when a numbered list is split by a non-list paragraph (e.g. a note mid-procedure), the accumulator flushes and restarts numbering from 1. Fix requires threading `numId` from `numPr` through `_ListItem` to the accumulator so continuation can be detected and the count preserved. Common in technical documents.
 - Vector conversion: EMF/WMF require Inkscape on PATH (or macOS .app bundle); EPS requires Ghostscript (`gs`) on PATH + Pillow. Missing tools produce `UnsupportedBlock`.
+- PPTX title detection: only recognizes placeholder types 1/13/15 (TITLE/CENTER_TITLE/VERTICAL_TITLE). Real-world presentations often use free-form text boxes for titles — these come through as ParagraphBlock instead of HeadingBlock.
+
+## PDF Converter Issues (discovered via real-file testing, 2026-05-10)
+
+1. **Bullet list flattening** — PyMuPDF groups all bullet items into a single text block. The converter emits them as one long line (`• item1 • item2 • item3`) instead of splitting on `•` characters to produce proper markdown list items. Fix: detect bullet characters (`•`, `-`, `–`) at line boundaries within a block and emit `ListBlock` items.
+
+2. **Heading heuristic too aggressive** — `_font_size_to_heading_level()` classifies any large font as a heading. Presentation PDFs use 24-28pt for body text, so everything becomes `##`. Fix: needs relative sizing (compare to document's dominant/median font size) rather than absolute thresholds.
+
+3. **Image explosion on presentation PDFs** — switching from `rawdict` to `dict` mode exposed many small raster images (icons, logos, slide decorations) that get individually extracted. Fix: add minimum image dimension/area threshold to skip tiny decorative images.
+
+4. **Repeated page headers not filtered** — "Contains Nonbinding Recommendations" appears on every page of the FDA doc but isn't caught by the header/footer heuristic. Fix: detect repeated text that appears in the same position across multiple pages and suppress it.
+
+5. **Table extraction requires pandas** — `find_tables()` in PyMuPDF needs pandas. Not in requirements.txt/pyproject.toml. Fails silently with a warning per table. Fix: add pandas as optional dependency, or find alternative table extraction.
+
+6. **PyMuPDF stderr noise** — "Consider using pymupdf_layout" and "Package 'pandas' is not installed" messages leak to stdout/stderr from PyMuPDF internals. Fix: suppress or redirect PyMuPDF's internal logging.
 
 ## Test Files
 All under `tests/`:
@@ -105,3 +120,8 @@ All under `tests/`:
 - 2026-05-09: Refactored config.py to be purely declarative (INKSCAPE_FALLBACK, GS_FALLBACKS); moved binary resolution logic to _find_inkscape()/_find_gs() in converter_vector.py
 - 2026-05-09: 205 tests passing (196 unit/property + 9 live), 0 failures
 - 2026-05-09: Removed orphan test fixtures (test.emf/wmf/eps); tests generate minimal fixtures on the fly; test_live_vector.py auto-discovers all files in test_fixtures/ by extension
+- 2026-05-09: Audit — updated design.md (VectorConverter EPS→Pillow+gs, Property 9 SVG/PNG split), pyproject.toml (added Pillow, moved hypothesis to dev), tasks.md note, test counts
+- 2026-05-10: Fixed PDF vector extraction — replaced broken `get_svg_image(clip=bbox)` with `get_pixmap(clip=bbox)` for PNG rasterization (PyMuPDF 1.27 doesn't support clip param on get_svg_image)
+- 2026-05-10: Fixed PDF text extraction — switched from `get_text("rawdict", flags=TEXT_PRESERVE_WHITESPACE)` to `get_text("dict")` (rawdict returns empty text in PyMuPDF 1.27)
+- 2026-05-10: Removed VectorConverter dependency from converter_pdf.py (no longer needed; vector clusters rasterized directly via get_pixmap)
+- 2026-05-10: Real-file testing on presentation PDF, DDS tutorial, FDA guidance, HP app note — text extraction working, identified 6 quality issues for future work

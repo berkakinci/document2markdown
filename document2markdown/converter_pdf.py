@@ -5,7 +5,7 @@ Supported mappings:
 * Text blocks (sorted for reading order)  → :class:`HeadingBlock` / :class:`ParagraphBlock`
 * Tables (via PyMuPDF table finder)        → :class:`TableBlock`
 * Raster images                            → :class:`EmbeddedAsset` + :class:`ImageBlock`
-* Vector path clusters (get_drawings)      → SVG via get_svg_image → :class:`VectorConverter`
+* Vector path clusters (get_drawings)      → PNG via get_pixmap(clip=bbox)
                                              → :class:`EmbeddedAsset` + :class:`ImageBlock`
 * Unrenderable elements                    → :class:`UnsupportedBlock`
 
@@ -32,7 +32,6 @@ except ImportError as _fitz_err:  # pragma: no cover
 
 from document2markdown.config import RASTER_DPI
 from document2markdown.converter_base import BaseConverter
-from document2markdown.converter_vector import VectorConverter, VectorConversionError
 from document2markdown.document_model import (
     ConversionResult,
     EmbeddedAsset,
@@ -84,6 +83,10 @@ _YBAND_TOLERANCE: float = 0.015
 # Minimum area (pt²) for a vector cluster to be extracted as an image.
 # Tiny clusters (hairlines, borders) are skipped.
 _MIN_VECTOR_AREA: float = 400.0
+
+# Maximum fraction of page area a vector cluster may occupy.
+# Clusters larger than this are likely backgrounds/decorations and are skipped.
+_MAX_VECTOR_PAGE_FRACTION: float = 0.6
 
 # Proximity threshold (points) for merging adjacent drawing bounding boxes
 # into a single vector cluster.
@@ -265,7 +268,7 @@ class PDFConverter(BaseConverter):
     """
 
     def __init__(self, raster_dpi: int = RASTER_DPI) -> None:
-        self._vector = VectorConverter(raster_dpi=raster_dpi)
+        self._raster_dpi = raster_dpi
 
     # ------------------------------------------------------------------
     # Public interface
@@ -325,7 +328,7 @@ class PDFConverter(BaseConverter):
         # ------------------------------------------------------------------
         # 3. Extract raw text/image blocks and linearize reading order.
         # ------------------------------------------------------------------
-        raw_dict = page.get_text("rawdict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+        raw_dict = page.get_text("dict")
         raw_blocks = raw_dict.get("blocks", [])
         raw_blocks = _linearize_blocks(raw_blocks, page_height)
 
@@ -364,7 +367,7 @@ class PDFConverter(BaseConverter):
         embedded: list[EmbeddedAsset],
         warnings: list[str],
     ) -> list[fitz.Rect]:
-        """Detect vector path clusters and export each as SVG.
+        """Detect vector path clusters and export each as PNG.
 
         Appends :class:`ImageBlock` entries to *blocks* for each cluster and
         returns the list of bounding boxes that were successfully extracted
@@ -382,10 +385,16 @@ class PDFConverter(BaseConverter):
             return extracted_bboxes
 
         clusters = _cluster_drawings(drawings, _CLUSTER_PROXIMITY)
+        page_area = page.rect.width * page.rect.height
 
         for cluster_bbox in clusters:
             # Skip tiny clusters (hairlines, borders, decorative rules)
             if _bbox_area(cluster_bbox) < _MIN_VECTOR_AREA:
+                continue
+
+            # Skip clusters that cover too much of the page (backgrounds,
+            # decorations, full-page borders).  These would occlude text.
+            if page_area > 0 and _bbox_area(cluster_bbox) / page_area > _MAX_VECTOR_PAGE_FRACTION:
                 continue
 
             # Skip clusters in header/footer zones
@@ -408,41 +417,35 @@ class PDFConverter(BaseConverter):
         embedded: list[EmbeddedAsset],
         warnings: list[str],
     ) -> ImageBlock | None:
-        """Export a vector cluster region as SVG and emit an ImageBlock."""
+        """Export a vector cluster region as PNG and emit an ImageBlock.
+
+        Uses ``page.get_pixmap(clip=bbox)`` to rasterize the cluster region
+        at the configured DPI.  PyMuPDF's ``get_svg_image()`` does not support
+        a ``clip`` parameter, so rasterization is the reliable path for
+        extracting individual vector regions from a page.
+        """
         try:
-            svg_bytes: bytes = page.get_svg_image(clip=bbox).encode("utf-8")
+            # Scale matrix: default page resolution is 72 DPI; scale up to
+            # raster_dpi for high-quality output.
+            scale = self._raster_dpi / 72.0
+            mat = fitz.Matrix(scale, scale)
+            pixmap = page.get_pixmap(matrix=mat, clip=bbox)
+            png_bytes: bytes = pixmap.tobytes("png")
         except Exception as exc:
             warnings.append(
-                f"get_svg_image() failed for cluster on page {page.number}: {exc}"
+                f"get_pixmap() failed for cluster on page {page.number}: {exc}"
             )
             return None
 
-        if not svg_bytes:
+        if not png_bytes:
             return None
-
-        # Pass through VectorConverter for normalization.
-        # The SVG from PyMuPDF is already valid SVG, but we pass it through
-        # VectorConverter for consistency.  source_format="svg" is not a
-        # recognised EMF/WMF/EPS format so Inkscape will handle it if available.
-        try:
-            out_bytes, ext = self._vector.convert(svg_bytes, "svg")  # type: ignore[arg-type]
-        except VectorConversionError:
-            # VectorConverter already logged a warning; use raw SVG directly.
-            out_bytes = svg_bytes
-            ext = ".svg"
-        except Exception as exc:
-            warnings.append(
-                f"VectorConverter failed for cluster on page {page.number}: {exc}"
-            )
-            out_bytes = svg_bytes
-            ext = ".svg"
 
         asset = EmbeddedAsset(
-            data=out_bytes,
-            extension=ext,
+            data=png_bytes,
+            extension=".png",
             original_name=None,
             alt_text="vector figure",
-            source_vector_format="svg",
+            source_vector_format=None,
         )
         idx = len(embedded)
         embedded.append(asset)
