@@ -25,7 +25,7 @@ class UnsupportedFormatError(Exception):
             if detected_type
             else "file type could not be determined"
         )
-        super().__init__(f"ERROR: {self.file_path}: {reason}")
+        super().__init__(f"{self.file_path}: {reason}")
 
 
 class MimeExtensionMismatchError(UnsupportedFormatError):
@@ -54,7 +54,7 @@ class MimeExtensionMismatchError(UnsupportedFormatError):
         # Bypass UnsupportedFormatError.__init__ to set a custom message.
         Exception.__init__(
             self,
-            f"ERROR: {self.file_path}: extension implies '{extension_type}' "
+            f"{self.file_path}: extension implies '{extension_type}' "
             f"but magic bytes indicate '{magic_type}'",
         )
         # Keep detected_type consistent with the parent interface.
@@ -75,4 +75,4 @@ class ParseError(Exception):
     def __init__(self, file_path: Path | str, reason: str) -> None:
         self.file_path = Path(file_path)
         self.reason = reason
-        super().__init__(f"ERROR: {self.file_path}: {reason}")
+        super().__init__(f"{self.file_path}: {reason}")

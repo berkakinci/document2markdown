@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from document2markdown.config import OUTPUT_DIR_NAME
+from document2markdown.dispatcher import EXTENSION_TO_MIME
 
 if TYPE_CHECKING:
     from document2markdown.api import Converter
@@ -81,7 +82,10 @@ def convert_directory(
         Exceptions are captured rather than raised (same as
         :func:`convert_batch`).
     """
-    paths = sorted(p for p in directory.glob(pattern) if p.is_file())
+    paths = sorted(
+        p for p in directory.glob(pattern)
+        if p.is_file() and p.suffix.lower() in EXTENSION_TO_MIME
+    )
     results: list[tuple[Path, Union[Document, Exception]]] = []
     for source_path in paths:
         try:

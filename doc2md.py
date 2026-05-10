@@ -21,7 +21,12 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Unbuffered stdout/stderr so progress is visible immediately.
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 from document2markdown.api import Converter
+from document2markdown.config import OUTPUT_DIR_NAME
 from document2markdown.utils import convert_batch
 
 
@@ -145,20 +150,18 @@ def _run(args: CLIArgs) -> BatchSummary:
             print(f"ERROR: {path}: {reason}", file=sys.stderr)
         else:
             # outcome is a Document
-            if args.verbose:
-                print(f"Converting: {path}")
-
             try:
-                # When --output is provided, pass as explicit output_dir
-                # When not provided, Document.save() uses its default
-                # (source_parent / OUTPUT_DIR_NAME)
-                if args.output is not None and not input_is_directory:
+                if input_is_directory:
+                    # convert_directory already saved with mirrored paths;
+                    # just report the result path.
+                    relative = path.relative_to(args.files[0])
+                    saved = args.files[0] / OUTPUT_DIR_NAME / relative.with_suffix(".md")
+                elif args.output is not None:
                     # --output provided for file(s) mode
                     out_dir = _resolve_output_dir(args.output, path)
                     saved = outcome.save(out_dir)
                 else:
-                    # No --output or directory mode (mirroring handled by
-                    # convert_directory which sets output_dir on the Converter)
+                    # No --output, file(s) mode — Document.save() uses default
                     saved = outcome.save()
 
                 if outcome.skipped:
