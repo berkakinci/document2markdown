@@ -4,11 +4,15 @@
 - EPS: tested via Pillow + Ghostscript (gs).
 
 All tests are skipped automatically when the required binary is absent.
+
+Fixture discovery is automatic: drop any .emf, .wmf, or .eps file into
+``test_fixtures/`` and it will be picked up by the parametrized tests
+without any code changes.
 """
 from __future__ import annotations
 
-import subprocess
-import tempfile
+import struct
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -19,6 +23,24 @@ from document2markdown.converter_vector import (
     _inkscape_available,
     _ghostscript_available,
 )
+
+
+# ---------------------------------------------------------------------------
+# Fixture discovery
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = Path(__file__).parent.parent / "test_fixtures"
+
+def _discover(ext: str) -> list[Path]:
+    """Return all files with the given extension in test_fixtures/."""
+    if not _FIXTURES_DIR.is_dir():
+        return []
+    return sorted(_FIXTURES_DIR.glob(f"*.{ext}"))
+
+
+_emf_files = _discover("emf")
+_wmf_files = _discover("wmf")
+_eps_files = _discover("eps")
 
 
 # ---------------------------------------------------------------------------
@@ -37,13 +59,11 @@ ghostscript_required = pytest.mark.skipif(
 
 
 # ---------------------------------------------------------------------------
-# Fixture helpers
+# Minimal programmatic fixtures (fallback when no files on disk)
 # ---------------------------------------------------------------------------
 
 def _make_emf() -> bytes:
     """Minimal valid EMF containing a single rectangle."""
-    import struct
-
     def emf_header() -> bytes:
         bounds = struct.pack("<iiii", 0, 0, 100, 100)
         frame  = struct.pack("<iiii", 0, 0, 2540, 2540)
@@ -74,20 +94,6 @@ def _make_emf() -> bytes:
     return header + rect + eof_rec
 
 
-def _real_emf() -> bytes:
-    """Return the real-world art-nouveau EMF fixture if present, else minimal."""
-    f = Path(__file__).parent.parent / "test_fixtures" / "art-nouveau-P3.emf"
-    return f.read_bytes() if f.exists() else _make_emf()
-
-
-def _real_wmf() -> bytes:
-    """Return the real-world art-nouveau WMF fixture (required — no valid minimal fallback)."""
-    f = Path(__file__).parent.parent / "test_fixtures" / "art-nouveau-P3.wmf"
-    if not f.exists():
-        pytest.skip("art-nouveau-P3.wmf fixture not found")
-    return f.read_bytes()
-
-
 def _make_eps() -> bytes:
     """Minimal valid EPS containing a filled rectangle."""
     return (
@@ -101,86 +107,110 @@ def _make_eps() -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# EMF tests (Inkscape)
+# EMF tests (Inkscape) — parametrized over all .emf fixtures
 # ---------------------------------------------------------------------------
 
+@inkscape_required
 class TestLiveVectorEMF:
-    @inkscape_required
-    def test_emf_converts_to_svg(self):
+    @pytest.mark.parametrize(
+        "emf_path",
+        _emf_files if _emf_files else [None],
+        ids=[f.name for f in _emf_files] if _emf_files else ["minimal"],
+    )
+    def test_emf_converts_to_svg(self, emf_path: Path | None):
+        data = emf_path.read_bytes() if emf_path else _make_emf()
         vc = VectorConverter()
-        data, ext = vc.convert(_real_emf(), "emf")
+        output, ext = vc.convert(data, "emf")
         assert ext == ".svg"
-        assert len(data) > 0
-        assert b"<svg" in data
+        assert len(output) > 0
+        assert b"<svg" in output
 
-    @inkscape_required
-    def test_emf_svg_is_valid_xml(self):
-        import xml.etree.ElementTree as ET
+    @pytest.mark.parametrize(
+        "emf_path",
+        _emf_files if _emf_files else [None],
+        ids=[f.name for f in _emf_files] if _emf_files else ["minimal"],
+    )
+    def test_emf_svg_is_valid_xml(self, emf_path: Path | None):
+        data = emf_path.read_bytes() if emf_path else _make_emf()
         vc = VectorConverter()
-        data, ext = vc.convert(_real_emf(), "emf")
+        output, ext = vc.convert(data, "emf")
         assert ext == ".svg"
-        ET.fromstring(data)  # must not raise
+        ET.fromstring(output)  # must not raise
 
-    @inkscape_required
-    def test_emf_svg_has_child_elements(self):
-        import xml.etree.ElementTree as ET
+    @pytest.mark.parametrize(
+        "emf_path",
+        _emf_files if _emf_files else [None],
+        ids=[f.name for f in _emf_files] if _emf_files else ["minimal"],
+    )
+    def test_emf_svg_has_child_elements(self, emf_path: Path | None):
+        data = emf_path.read_bytes() if emf_path else _make_emf()
         vc = VectorConverter()
-        data, _ = vc.convert(_real_emf(), "emf")
-        root = ET.fromstring(data)
+        output, _ = vc.convert(data, "emf")
+        root = ET.fromstring(output)
         assert len(list(root.iter())) > 1
 
 
 # ---------------------------------------------------------------------------
-# WMF tests (Inkscape)
+# WMF tests (Inkscape) — parametrized over all .wmf fixtures
 # ---------------------------------------------------------------------------
 
+@inkscape_required
 class TestLiveVectorWMF:
-    @inkscape_required
-    def test_wmf_converts_to_svg(self):
+    @pytest.mark.skipif(not _wmf_files, reason="No .wmf fixtures in test_fixtures/")
+    @pytest.mark.parametrize(
+        "wmf_path",
+        _wmf_files,
+        ids=[f.name for f in _wmf_files],
+    )
+    def test_wmf_converts_to_svg(self, wmf_path: Path):
         vc = VectorConverter()
-        data, ext = vc.convert(_real_wmf(), "wmf")
+        output, ext = vc.convert(wmf_path.read_bytes(), "wmf")
         assert ext == ".svg"
-        assert len(data) > 0
-        assert b"<svg" in data
+        assert len(output) > 0
+        assert b"<svg" in output
 
-    @inkscape_required
-    def test_wmf_svg_is_valid_xml(self):
-        import xml.etree.ElementTree as ET
+    @pytest.mark.skipif(not _wmf_files, reason="No .wmf fixtures in test_fixtures/")
+    @pytest.mark.parametrize(
+        "wmf_path",
+        _wmf_files,
+        ids=[f.name for f in _wmf_files],
+    )
+    def test_wmf_svg_is_valid_xml(self, wmf_path: Path):
         vc = VectorConverter()
-        data, ext = vc.convert(_real_wmf(), "wmf")
+        output, ext = vc.convert(wmf_path.read_bytes(), "wmf")
         assert ext == ".svg"
-        ET.fromstring(data)  # must not raise
+        ET.fromstring(output)  # must not raise
 
 
 # ---------------------------------------------------------------------------
-# EPS tests (Pillow + Ghostscript)
+# EPS tests (Pillow + Ghostscript) — parametrized over all .eps fixtures
 # ---------------------------------------------------------------------------
 
+@ghostscript_required
 class TestLiveVectorEPS:
-    @ghostscript_required
-    def test_eps_converts_to_png(self):
+    @pytest.mark.parametrize(
+        "eps_path",
+        _eps_files if _eps_files else [None],
+        ids=[f.name for f in _eps_files] if _eps_files else ["minimal"],
+    )
+    def test_eps_converts_to_png(self, eps_path: Path | None):
+        data = eps_path.read_bytes() if eps_path else _make_eps()
         vc = VectorConverter()
-        data, ext = vc.convert(_make_eps(), "eps")
+        output, ext = vc.convert(data, "eps")
         assert ext == ".png"
-        assert len(data) > 0
+        assert len(output) > 0
 
-    @ghostscript_required
-    def test_eps_png_has_valid_header(self):
+    @pytest.mark.parametrize(
+        "eps_path",
+        _eps_files if _eps_files else [None],
+        ids=[f.name for f in _eps_files] if _eps_files else ["minimal"],
+    )
+    def test_eps_png_has_valid_header(self, eps_path: Path | None):
+        data = eps_path.read_bytes() if eps_path else _make_eps()
         vc = VectorConverter()
-        data, ext = vc.convert(_make_eps(), "eps")
+        output, ext = vc.convert(data, "eps")
         assert ext == ".png"
-        assert data[:8] == b"\x89PNG\r\n\x1a\n"
-
-    @ghostscript_required
-    def test_eps_real_fixture(self):
-        """Real-world EPS fixture from Inkscape examples."""
-        f = Path(__file__).parent.parent / "test_fixtures" / "art-nouveau-P3.eps"
-        if not f.exists():
-            pytest.skip("art-nouveau-P3.eps fixture not found")
-        vc = VectorConverter()
-        data, ext = vc.convert(f.read_bytes(), "eps")
-        assert ext == ".png"
-        assert len(data) > 0
+        assert output[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 # ---------------------------------------------------------------------------

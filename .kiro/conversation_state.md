@@ -59,15 +59,11 @@ All under `tests/`:
 
 ## Remaining TODO
 
-1. **Clean up `test_fixtures/`** — decide whether to keep in repo or add to `.gitignore`
-   - Binary fixtures (EMF, WMF) are small (40-60KB) and useful for live tests
-   - Could add a `conftest.py` fixture that skips live tests if `test_fixtures/` is absent
-
-2. **Coverage check** — run `pytest --cov` to see if the new Pillow EPS path is covered
+1. **Coverage check** — run `pytest --cov` to see if the new Pillow EPS path is covered
    - `_try_pillow_eps_png` lines for the `Image.open()` success path may not be hit by unit tests
    - The live test covers it but live tests don't count toward coverage by default
 
-3. **Remaining coverage gaps** (diminishing returns — require real binary fixtures or live tools):
+2. **Remaining coverage gaps** (diminishing returns — require real binary fixtures or live tools):
    - `converter_pdf.py` (79%), `converter_docx.py` (75%), `converter_pptx.py` (81%)
    - `renderer_base.py` (89%), `postprocess.py` (87%), `writer.py` (84%), `errors.py` (85%)
 
@@ -108,3 +104,4 @@ All under `tests/`:
 - 2026-05-09: Added Property 9b tests (EPS→PNG success + failure) to test_property_vector.py
 - 2026-05-09: Refactored config.py to be purely declarative (INKSCAPE_FALLBACK, GS_FALLBACKS); moved binary resolution logic to _find_inkscape()/_find_gs() in converter_vector.py
 - 2026-05-09: 205 tests passing (196 unit/property + 9 live), 0 failures
+- 2026-05-09: Removed orphan test fixtures (test.emf/wmf/eps); tests generate minimal fixtures on the fly; test_live_vector.py auto-discovers all files in test_fixtures/ by extension
