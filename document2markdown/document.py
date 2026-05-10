@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from document2markdown.config import OUTPUT_DIR_NAME
 from document2markdown.document_model import ConversionResult
 from document2markdown.renderer_base import BaseRenderer, MarkdownRenderer
 from document2markdown.writer import OutputWriter
@@ -37,8 +38,11 @@ class Document:
         :class:`~document2markdown.renderer_base.MarkdownRenderer` if *None*.
     output_dir:
         Default output directory used by :meth:`save` when no *output*
-        argument is supplied.  If *None*, :meth:`save` writes alongside the
-        source file.
+        argument is supplied.  If *None*, :meth:`save` writes to
+        ``{source_parent}/{OUTPUT_DIR_NAME}/``.
+    force:
+        When *True*, bypass skip-if-newer logic and always write output.
+        Passed through to :meth:`OutputWriter.write`.
     """
 
     def __init__(
@@ -47,11 +51,14 @@ class Document:
         result: ConversionResult,
         renderer: BaseRenderer | None = None,
         output_dir: Path | None = None,
+        force: bool = False,
     ) -> None:
         self._source_path = source_path
         self._result = result
         self._renderer = renderer
         self._output_dir = output_dir
+        self._force = force
+        self._skipped: bool = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -66,6 +73,11 @@ class Document:
     def warnings(self) -> list[str]:
         """Non-fatal warnings collected during conversion."""
         return list(self._result.warnings)
+
+    @property
+    def skipped(self) -> bool:
+        """True if skip-if-newer logic determined the output is up-to-date."""
+        return self._skipped
 
     # ------------------------------------------------------------------
     # Public methods
@@ -101,7 +113,8 @@ class Document:
         output:
             Destination directory (or file path).  When *None*, falls back to
             the *output_dir* supplied at construction time; if that is also
-            *None*, the file is written alongside the source document.
+            *None*, the file is written to
+            ``{source_parent}/{OUTPUT_DIR_NAME}/``.
 
         Returns
         -------
@@ -109,5 +122,11 @@ class Document:
             Absolute path to the written ``.md`` file.
         """
         out_dir = output or self._output_dir
+        if out_dir is None:
+            out_dir = self._source_path.parent / OUTPUT_DIR_NAME
         writer = OutputWriter(renderer=self._renderer)
-        return writer.write(self._result, self._source_path, out_dir)
+        md_path, skipped = writer.write(
+            self._result, self._source_path, out_dir, force=self._force
+        )
+        self._skipped = skipped
+        return md_path

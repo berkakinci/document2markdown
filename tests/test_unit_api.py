@@ -156,12 +156,12 @@ class TestConvertDirectory:
 # ---------------------------------------------------------------------------
 
 class TestDefaultOutputDirectory:
-    def test_default_output_written_to_source_dir(self, tmp_path):
-        """When no output is specified, .md is written alongside the source file."""
+    def test_default_output_written_to_output_dir_name(self, tmp_path):
+        """When no output is specified, .md is written to {source_parent}/OUTPUT_DIR_NAME/."""
         src = tmp_path / "sample.txt"
         src.write_text("Hello default output.", encoding="utf-8")
         doc = Converter().convert(src)
         saved = doc.save()  # no output argument
         assert saved.exists()
-        assert saved.parent == tmp_path
+        assert saved.parent == tmp_path / "Exports - Conversions"
         assert saved.name == "sample.md"

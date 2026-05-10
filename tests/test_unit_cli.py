@@ -45,7 +45,7 @@ class TestBatchSummaryCounts:
 
         captured = capsys.readouterr()
         assert "3 total" in captured.out
-        assert "2 succeeded" in captured.out
+        assert "2 converted" in captured.out
         assert "1 failed" in captured.out
         assert rc != 0  # failures → non-zero exit
 
@@ -64,7 +64,7 @@ class TestNonExistentFile:
         # Error should appear on stderr
         assert "missing.txt" in captured.err or "missing" in captured.err.lower()
         # Good file should still be processed
-        assert "1 succeeded" in captured.out
+        assert "1 converted" in captured.out
         assert "1 failed" in captured.out
 
     def test_remaining_files_processed_after_failure(self, tmp_path, capsys):

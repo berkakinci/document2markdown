@@ -270,25 +270,25 @@ Implement default output directory, directory mirroring, skip-if-newer, `--force
 
 **Design principle:** The writer already receives a resolved `output_dir: Path`. That pattern stays. New logic (default dir name, mirroring, skip-if-newer) lives in `utils.py` and `doc2md.py` — the layers that already decide *where* to write. The writer gains only `force` and timestamp checking. `EMBEDDED_DIR` in config.py keeps its current role.
 
-- [ ] 15. Config constants and `force` on Converter
-  - [ ] 15.1 Update `document2markdown/config.py`
+- [x] 15. Config constants and `force` on Converter
+  - [x] 15.1 Update `document2markdown/config.py`
     - Add `OUTPUT_DIR_NAME: str = "Exports - Conversions"`
     - Keep `EMBEDDED_DIR` as-is (no rename — avoids churn in existing tests)
     - _Requirements: 3.3, 3.9_
 
-  - [ ] 15.2 Add `force: bool = False` param to `Converter.__init__` in `api.py`
+  - [x] 15.2 Add `force: bool = False` param to `Converter.__init__` in `api.py`
     - Store as `self._force`; pass to `Document` construction
     - No other new params on Converter — dir name resolution stays in utils/CLI
     - _Requirements: 3.6_
 
-  - [ ] 15.3 Add `force` and `skipped` to `Document` in `document.py`
+  - [x] 15.3 Add `force` and `skipped` to `Document` in `document.py`
     - Accept `force: bool` in constructor (from Converter)
     - Add `self._skipped: bool = False` with a `@property skipped`
     - `Document.save()` passes `force` to `OutputWriter.write()`; sets `self._skipped` from return value
     - _Requirements: 3.5, 3.6_
 
-- [ ] 16. Skip-if-newer logic in the writer
-  - [ ] 16.1 Add timestamp check to `OutputWriter.write()` in `writer.py`
+- [x] 16. Skip-if-newer logic in the writer
+  - [x] 16.1 Add timestamp check to `OutputWriter.write()` in `writer.py`
     - New param: `force: bool = False`
     - Before writing `.md`: if target exists, compare `target.stat().st_mtime` vs `source_path.stat().st_mtime`
       - target newer and not force → skip, print `INFO: {path}: up-to-date, skipping` to stderr, return `(md_path, skipped=True)`
@@ -308,8 +308,8 @@ Implement default output directory, directory mirroring, skip-if-newer, `--force
     - `force=True` → always overwrite
     - _Requirements: 3.5, 3.6, 3.7_
 
-- [ ] 17. Default output directory (orchestration layer)
-  - [ ] 17.1 Update `Document.save()` default path logic
+- [x] 17. Default output directory (orchestration layer)
+  - [x] 17.1 Update `Document.save()` default path logic
     - Current: `output_dir` defaults to `source_path.parent`
     - New: when `output_dir is None`, compute `source_path.parent / OUTPUT_DIR_NAME`
     - Import `OUTPUT_DIR_NAME` from config (same pattern as `EMBEDDED_DIR`)
@@ -322,10 +322,10 @@ Implement default output directory, directory mirroring, skip-if-newer, `--force
     - Relative to source, not CWD (test by running from a different cwd)
     - _Requirements: 3.3, 3.8, 3.12_
 
-- [ ] 18. Checkpoint — Ensure existing tests still pass + new tests pass
+- [x] 18. Checkpoint — Ensure existing tests still pass + new tests pass
 
-- [ ] 19. Directory structure mirroring (utils layer)
-  - [ ] 19.1 Update `convert_directory` in `document2markdown/utils.py`
+- [x] 19. Directory structure mirroring (utils layer)
+  - [x] 19.1 Update `convert_directory` in `document2markdown/utils.py`
     - Compute `relative = source_path.relative_to(traversed_root)`
     - Resolve output dir: `traversed_root / OUTPUT_DIR_NAME / relative.parent`
     - Pass resolved `output_dir` to `Document.save(output=resolved_dir)` — writer sees a concrete Path, no new params needed
@@ -341,17 +341,17 @@ Implement default output directory, directory mirroring, skip-if-newer, `--force
   - [ ]* 19.3 Write property test — Property 8: Output path derivation with directory mirroring
     - **Validates: Requirements 3.3, 3.4, 3.8, 3.9, 3.12**
 
-- [ ] 20. CLI: `--force` flag and `BatchSummary.skipped`
-  - [ ] 20.1 Add `--force` to argparse in `doc2md.py`
+- [x] 20. CLI: `--force` flag and `BatchSummary.skipped`
+  - [x] 20.1 Add `--force` to argparse in `doc2md.py`
     - Pass `force=True` to `Converter` constructor
     - _Requirements: 3.6_
 
-  - [ ] 20.2 Add `skipped` count to batch summary in `doc2md.py`
+  - [x] 20.2 Add `skipped` count to batch summary in `doc2md.py`
     - After each conversion, check `doc.skipped`; increment skipped counter
     - Print in summary line: `N converted, M skipped, K failed`
     - _Requirements: 3.5, 3.6_
 
-  - [ ] 20.3 Wire default output dir into CLI (no `--output` case)
+  - [x] 20.3 Wire default output dir into CLI (no `--output` case)
     - When `--output` not provided and input is a directory → use `convert_directory` with mirroring
     - When `--output` not provided and input is file(s) → `Document.save()` uses its new default (task 17.1)
     - When `--output` provided → pass as explicit `output_dir` (existing behavior)
@@ -363,13 +363,13 @@ Implement default output directory, directory mirroring, skip-if-newer, `--force
     - No `--output` → default dir used
     - _Requirements: 3.5, 3.6_
 
-- [ ] 21. Config file support for directory names
-  - [ ] 21.1 Add `load_config()` to `document2markdown/config.py`
+- [x] 21. Config file support for directory names
+  - [x] 21.1 Add `load_config()` to `document2markdown/config.py`
     - Read `[tool.document2markdown]` from `pyproject.toml` (if present in CWD or parents)
     - Return dict with `output_dir_name` and `assets_dir_name` (falling back to module constants)
     - _Requirements: 3.10_
 
-  - [ ] 21.2 Wire config into `Document.save()` and `convert_directory`
+  - [x] 21.2 Wire config into `Document.save()` and `convert_directory`
     - On first call, load config once; use `output_dir_name` from config when computing default paths
     - Constructor/explicit params still override (Converter stores explicit values; if set, they win)
     - `EMBEDDED_DIR` in writer stays as-is for now — config override for assets dir is a stretch goal
@@ -393,7 +393,7 @@ Implement default output directory, directory mirroring, skip-if-newer, `--force
     - All existing 200+ tests still pass
     - _Requirements: 3.3, 3.4, 3.5, 3.6, 3.8, 3.9, 3.10_
 
-- [ ] 23. Final checkpoint — All tests pass (existing + new)
+- [x] 23. Final checkpoint — All tests pass (existing + new)
 
 ## Task Dependency Graph (Tasks 15–23)
 

@@ -33,6 +33,7 @@ from document2markdown.utils import convert_batch
 class CLIArgs:
     files: list[Path]
     output: Path | None
+    force: bool
     verbose: bool
 
 
@@ -40,6 +41,7 @@ class CLIArgs:
 class BatchSummary:
     total: int
     succeeded: int
+    skipped: int
     failed: int
     errors: list[tuple[Path, str]] = field(default_factory=list)
 
@@ -66,6 +68,12 @@ def _parse_args(argv: list[str] | None = None) -> CLIArgs:
         help="Target file path or directory for Markdown output.",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Reconvert all files regardless of modification timestamps.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         default=False,
@@ -75,6 +83,7 @@ def _parse_args(argv: list[str] | None = None) -> CLIArgs:
     return CLIArgs(
         files=[Path(f) for f in ns.files],
         output=Path(ns.output) if ns.output else None,
+        force=ns.force,
         verbose=ns.verbose,
     )
 
@@ -106,28 +115,27 @@ def _resolve_output_dir(output: Path | None, source: Path) -> Path | None:
 # ---------------------------------------------------------------------------
 
 def _run(args: CLIArgs) -> BatchSummary:
-    summary = BatchSummary(total=len(args.files), succeeded=0, failed=0)
+    summary = BatchSummary(total=len(args.files), succeeded=0, skipped=0, failed=0)
 
-    # Determine output directory (shared for all files when --output is a dir)
-    output_is_dir = (
-        args.output is None
-        or args.output.is_dir()
-        or not args.output.suffix
-        or str(args.output).endswith("/")
+    # Determine if input is a single directory (directory mode)
+    input_is_directory = (
+        len(args.files) == 1 and args.files[0].is_dir()
     )
 
-    if output_is_dir:
-        shared_output_dir = args.output  # None → each file's own directory
-    else:
-        # Single-file output only makes sense for a single input file
-        shared_output_dir = None  # handled per-file below
-
     converter = Converter(
-        output_dir=shared_output_dir,
+        output_dir=args.output if args.output else None,
+        force=args.force,
         verbose=args.verbose,
     )
 
-    results = convert_batch(args.files, converter)
+    if input_is_directory:
+        # Directory mode: use convert_directory with mirroring (task 19.1)
+        from document2markdown.utils import convert_directory
+        results = convert_directory(args.files[0], converter, pattern="**/*")
+        summary.total = len(results)
+    else:
+        # File(s) mode: use convert_batch
+        results = convert_batch(args.files, converter)
 
     for path, outcome in results:
         if isinstance(outcome, Exception):
@@ -136,20 +144,27 @@ def _run(args: CLIArgs) -> BatchSummary:
             summary.errors.append((path, reason))
             print(f"ERROR: {path}: {reason}", file=sys.stderr)
         else:
-            # outcome is a _Document
+            # outcome is a Document
             if args.verbose:
                 print(f"Converting: {path}")
 
             try:
-                # Determine per-file output path
-                if not output_is_dir and args.output is not None:
-                    # --output is a specific file path (single-file mode)
-                    out_path = args.output
-                    saved = outcome.save(out_path.parent)
+                # When --output is provided, pass as explicit output_dir
+                # When not provided, Document.save() uses its default
+                # (source_parent / OUTPUT_DIR_NAME)
+                if args.output is not None and not input_is_directory:
+                    # --output provided for file(s) mode
+                    out_dir = _resolve_output_dir(args.output, path)
+                    saved = outcome.save(out_dir)
                 else:
+                    # No --output or directory mode (mirroring handled by
+                    # convert_directory which sets output_dir on the Converter)
                     saved = outcome.save()
 
-                summary.succeeded += 1
+                if outcome.skipped:
+                    summary.skipped += 1
+                else:
+                    summary.succeeded += 1
 
                 if args.verbose:
                     print(f"  -> {saved}")
@@ -169,7 +184,8 @@ def _print_summary(summary: BatchSummary) -> None:
     """Print the batch summary to stdout."""
     print(
         f"\nSummary: {summary.total} total, "
-        f"{summary.succeeded} succeeded, "
+        f"{summary.succeeded} converted, "
+        f"{summary.skipped} skipped, "
         f"{summary.failed} failed"
     )
 

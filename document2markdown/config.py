@@ -12,6 +12,10 @@ GS_FALLBACKS: tuple[str, ...] = ("/opt/homebrew/bin/gs", "/usr/local/bin/gs")
 # Can be overridden at runtime by passing raster_dpi to Converter().
 RASTER_DPI: int = 300
 
+# Default output directory name (relative to the source file's parent).
+# Used by Document.save() and convert_directory() when no explicit output path is given.
+OUTPUT_DIR_NAME: str = "Exports - Conversions"
+
 # Subdirectory name used for extracted embedded assets (relative to the
 # output .md file).
 EMBEDDED_DIR: str = "md_embedded"

@@ -103,9 +103,10 @@ class TestOutputWriter:
         src = tmp_path / "doc.txt"
         src.write_text("Hello")
         writer = OutputWriter()
-        md_path = writer.write(r, src, new_dir)
+        md_path, skipped = writer.write(r, src, new_dir)
         assert new_dir.exists()
         assert md_path.exists()
+        assert not skipped
 
     def test_overwrites_existing_file_warns_stderr(self, tmp_path, capsys):
         r = _result(ParagraphBlock(text="Hello"))
@@ -114,7 +115,11 @@ class TestOutputWriter:
         writer = OutputWriter()
         # Write once
         writer.write(r, src, tmp_path)
-        # Write again — should warn
+        # Touch source so it's newer than target — triggers overwrite path
+        import os, time
+        time.sleep(0.05)
+        os.utime(src, None)
+        # Write again — should warn about overwriting
         writer.write(r, src, tmp_path)
         captured = capsys.readouterr()
         assert "WARNING" in captured.err or "overwriting" in captured.err.lower()

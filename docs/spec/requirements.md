@@ -57,14 +57,14 @@ Python CLI + library that converts PDF, DOCX, HTML, PPTX, and TXT into clean Mar
 
 1. `--output` CLI arg accepts a target file path or directory.
 2. `--output` is a directory → write `{basename}.md` into it.
-3. No `--output` → write into `{output_dir_name}/` (default: `Exports - Conversions`), always relative to the source tree root (directory mode) or source file's parent (single-file mode). Never relative to CWD. Created once per invocation.
+3. No `--output` → write into `{output_dir_name}/` (default: `Exports - Conversions`), always relative to the source tree root (directory mode) or source file's parent (single-file mode). Never relative to CWD. All output goes into one output directory (not one per source file).
 4. Directory conversion mirrors source subdirectory structure inside the output directory. Example: `docs/deeper/file.pdf` → `docs/Exports - Conversions/deeper/file.md`.
 5. Skip-if-newer: if target `.md` exists with mtime > source mtime → skip + informational stderr message. Decision based solely on timestamps (no content validation).
 6. `--force` flag → reconvert all files regardless of timestamps.
 7. Target exists with mtime ≤ source mtime (and no `--force`) → overwrite + stderr warning.
 8. Missing output directories (including mirrored subdirectories) → create automatically.
-9. Embedded assets → extracted into `{assets_dir_name}/` (default: `md_embedded`) alongside each `.md` at its depth — not a single shared directory at the output root. Files named `{basename}_{0001..NNNN}.{ext}`. Example: `docs/Exports - Conversions/deeper/md_embedded/file_0001.png`.
-10. Both `output_dir_name` and `assets_dir_name` are configurable via config file and/or OO API constructor params. Constructor params take precedence over config file.
+9. Embedded assets → extracted into `{assets_dir_name}/` (default: `md_embedded`) alongside each `.md` at its depth — not a single shared directory at the output root. Files named `{basename}_{0001..NNNN}.{ext}`.
+10. `output_dir_name` and `assets_dir_name` are configurable via `pyproject.toml [tool.document2markdown]`. Explicit `output_dir` Path passed to `save()` always wins over the configured default.
 11. Links to embedded assets use relative, URL-encoded paths.
 12. File names, base names, and path prefixes are never modified. Spaces and special characters handled via proper quoting.
 

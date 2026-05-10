@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
+from document2markdown.config import OUTPUT_DIR_NAME
+
 if TYPE_CHECKING:
     from document2markdown.api import Converter
     from document2markdown.document import Document
@@ -56,10 +58,16 @@ def convert_directory(
 ) -> "list[tuple[Path, Union[Document, Exception]]]":
     """Convert all files matching *pattern* in *directory*.
 
+    Mirrors the source subdirectory structure inside the output directory.
+    Each converted file is saved to
+    ``{directory}/{OUTPUT_DIR_NAME}/{relative_parent}/``, so that
+    ``docs/deeper/file.pdf`` produces
+    ``docs/Exports - Conversions/deeper/file.md``.
+
     Parameters
     ----------
     directory:
-        Directory to scan for source documents.
+        Directory to scan for source documents (the traversed root).
     converter:
         A :class:`~document2markdown.api.Converter` instance.
     pattern:
@@ -74,4 +82,15 @@ def convert_directory(
         :func:`convert_batch`).
     """
     paths = sorted(p for p in directory.glob(pattern) if p.is_file())
-    return convert_batch(paths, converter)
+    results: list[tuple[Path, Union[Document, Exception]]] = []
+    for source_path in paths:
+        try:
+            doc = converter.convert(source_path)
+            # Compute mirrored output directory preserving subdirectory structure
+            relative = source_path.relative_to(directory)
+            output_dir = directory / OUTPUT_DIR_NAME / relative.parent
+            doc.save(output=output_dir)
+            results.append((source_path, doc))
+        except Exception as exc:  # noqa: BLE001
+            results.append((source_path, exc))
+    return results
