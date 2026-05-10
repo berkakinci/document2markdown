@@ -1,19 +1,20 @@
 # Conversation State — document2markdown
 
 ## Session Info
-- Date: May 9, 2026
+- Date: May 10, 2026
 
 ## Status
 - Implementation complete — all 14 required tasks done, all optional test tasks done
 - 204 unit/property tests + 8 live tests passing, 0 failures
 - Overall source coverage: 85%
 - `converter_vector.py` at 100% coverage
+- PDF converter significantly improved via real-file testing (Tier 1 quality fixes applied)
 
 ## Key Decisions
 - Module name: `document2markdown`
 - Project layout: `document2markdown/document2markdown/` (project dir / package dir — standard Python pattern)
 - Specs in `docs/spec/` with symlinks from `.kiro/specs/` for Kiro UI compatibility
-- PDF library: PyMuPDF (for vector extraction via `page.get_drawings()`)
+- PDF library: PyMuPDF (text via `get_text("dict")`, vectors via `get_pixmap(clip=bbox)`, drawings via `get_drawings()`)
 - Vector conversion chain:
   - EMF/WMF: Inkscape SVG → SVG (or PNG fallback) at configurable DPI
   - EPS: Pillow + Ghostscript (`gs`) → PNG (Inkscape 1.4+ on macOS cannot open EPS from CLI)
@@ -47,11 +48,11 @@
 
 ## PDF Converter Issues (discovered via real-file testing, 2026-05-10)
 
-1. **Bullet list flattening** — PyMuPDF groups all bullet items into a single text block. The converter emits them as one long line (`• item1 • item2 • item3`) instead of splitting on `•` characters to produce proper markdown list items. Fix: detect bullet characters (`•`, `-`, `–`) at line boundaries within a block and emit `ListBlock` items.
+1. ~~**Bullet list flattening**~~ — FIXED. `_extract_list_items()` detects bullet chars and numbered patterns at line boundaries, emits `ListBlock`.
 
-2. **Heading heuristic too aggressive** — `_font_size_to_heading_level()` classifies any large font as a heading. Presentation PDFs use 24-28pt for body text, so everything becomes `##`. Fix: needs relative sizing (compare to document's dominant/median font size) rather than absolute thresholds.
+2. ~~**Heading heuristic too aggressive**~~ — FIXED. `_relative_heading_level()` uses document's dominant body font size as baseline; only text ≥1.15x body is classified as heading.
 
-3. **Image explosion on presentation PDFs** — switching from `rawdict` to `dict` mode exposed many small raster images (icons, logos, slide decorations) that get individually extracted. Fix: add minimum image dimension/area threshold to skip tiny decorative images.
+3. ~~**Image explosion on presentation PDFs**~~ — FIXED. `_MIN_IMAGE_DIM = 50.0` skips images smaller than 50pt in either dimension.
 
 4. **Repeated page headers not filtered** — "Contains Nonbinding Recommendations" appears on every page of the FDA doc but isn't caught by the header/footer heuristic. Fix: detect repeated text that appears in the same position across multiple pages and suppress it.
 
@@ -125,3 +126,6 @@ All under `tests/`:
 - 2026-05-10: Fixed PDF text extraction — switched from `get_text("rawdict", flags=TEXT_PRESERVE_WHITESPACE)` to `get_text("dict")` (rawdict returns empty text in PyMuPDF 1.27)
 - 2026-05-10: Removed VectorConverter dependency from converter_pdf.py (no longer needed; vector clusters rasterized directly via get_pixmap)
 - 2026-05-10: Real-file testing on presentation PDF, DDS tutorial, FDA guidance, HP app note — text extraction working, identified 6 quality issues for future work
+- 2026-05-10: Tier 1 PDF quality fixes — bullet list detection (`_extract_list_items`), relative heading sizing (`_relative_heading_level` + `_compute_body_font_size`), image dimension filter (`_MIN_IMAGE_DIM=50`)
+- 2026-05-10: Added .gitignore for test_real/, __pycache__, .coverage, .hypothesis, .pytest_cache
+- 2026-05-10: Real-file testing: 12+ files across PDF/DOCX/PPTX — all succeed, no crashes

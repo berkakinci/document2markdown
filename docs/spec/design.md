@@ -161,14 +161,30 @@ PDFs have no single "embedded vector object" model. Vector content appears in th
 
 The PDF object hierarchy (catalog → pages → resources → XObjects) can enumerate Form XObjects, but it misses inline path operators entirely — which are the majority of real-world vector content.
 
-`PyMuPDF` abstracts over both: `page.get_drawings()` returns structured path data regardless of whether the vector content is inline or in a Form XObject. `page.get_svg_image(clip=rect)` can then export any bounding region as SVG. This is the primary reason PyMuPDF is recommended over `pdfplumber` for `PDFConverter`.
+`PyMuPDF` abstracts over both: `page.get_drawings()` returns structured path data regardless of whether the vector content is inline or in a Form XObject.
 
 **Extraction strategy in `PDFConverter`:**
 1. Call `page.get_drawings()` to get all vector path clusters on the page.
 2. Group spatially adjacent paths into logical figures using bounding-box clustering.
-3. For each cluster, call `page.get_svg_image(clip=bbox)` to export as SVG.
-4. Pass the SVG bytes to `VectorConverter` for normalization (or use directly if already valid SVG).
+3. Filter out clusters that are too small (`_MIN_VECTOR_AREA`) or too large (`_MAX_VECTOR_PAGE_FRACTION` — backgrounds/decorations).
+4. For each remaining cluster, rasterize to PNG via `page.get_pixmap(clip=bbox, matrix=scale_matrix)` at the configured DPI.
 5. Emit an `ImageBlock` referencing the extracted `EmbeddedAsset`.
+
+Note: `page.get_svg_image()` does not support a `clip` parameter in PyMuPDF 1.27. The full-page SVG includes all page content regardless of viewport, making it unsuitable for extracting individual vector regions. PNG rasterization at 300 DPI is the pragmatic choice.
+
+**Text extraction:**
+- Uses `page.get_text("dict")` to get span-level text with font metadata.
+- `"rawdict"` mode returns empty text in PyMuPDF 1.27 — do not use.
+
+**Heading detection:**
+- Uses relative font sizing: computes the document's dominant body font size (mode by character count) and classifies text as headings only when ≥1.15x the body size.
+- Absolute thresholds (`_font_size_to_heading_level`) retained as fallback when body size cannot be determined.
+
+**List detection:**
+- Lines starting with bullet characters (`•`, `●`, `○`, etc.) or numbered patterns (`1.`, `2)`) are detected and emitted as `ListBlock` items instead of being joined into a single paragraph.
+
+**Image filtering:**
+- Raster images smaller than `_MIN_IMAGE_DIM` (50pt) in either dimension are skipped as decorative elements.
 
 ### VectorConverter (`document2markdown/converter_vector.py`)
 
