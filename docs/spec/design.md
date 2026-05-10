@@ -51,10 +51,12 @@ The CLI is a thin layer over the library. It uses `document2markdown.utils` for 
 
 ```mermaid
 flowchart TD
-    CLI["doc2md.py\nargparse"]
+    CLI["doc2md.py\nargparse\n(--output, --force, --verbose)"]
     CLI --> Utils["document2markdown.utils\nconvert_batch / convert_directory"]
     Utils --> Conv["Converter\n(one file at a time)"]
-    Conv --> Doc["Document"]
+    Conv --> Skip{"Skip-if-newer?\n(unless --force)"}
+    Skip -->|No: proceed| Doc["Document"]
+    Skip -->|Yes: skip| Skipped["Document (skipped=True)"]
     Doc --> Save["Document.save(output)"]
     Save --> FS[("Filesystem")]
     Utils --> Summary["BatchSummary\nstdout"]
@@ -71,11 +73,12 @@ The CLI never touches the pipeline directly — it only orchestrates via the pub
 Parses arguments using `argparse`:
 
 ```
-usage: doc2md.py [-h] [--output OUTPUT] [--verbose] file [file ...]
+usage: doc2md.py [-h] [--output OUTPUT] [--force] [--verbose] file [file ...]
 ```
 
 - `file` — one or more source document paths (positional, required)
 - `--output` — target file path or directory
+- `--force` — reconvert all files regardless of modification timestamps (overrides skip-if-newer logic)
 - `--verbose` — print per-file progress to stdout
 
 Drives the batch loop, collects success/failure counts, prints the final summary.
@@ -263,10 +266,66 @@ This allows alternative renderers (e.g. `ObsidianMarkdownRenderer`, `PlainTextRe
 Serializes a rendered string and embedded assets to disk:
 - Accepts a `BaseRenderer` instance; calls `renderer.render(result)` to produce the output string
 - Writes output string to `{base_name}.md`
-- Writes embedded assets to `md_embedded/{base_name}_{serial:04d}{ext}`
+- Writes embedded assets to `{assets_dir_name}/{base_name}_{serial:04d}{ext}` (default `assets_dir_name`: `md_embedded`)
 - Generates URL-encoded relative paths for all image/link references
-- Overwrites existing output files with a stderr warning
 - Creates output directories as needed
+
+#### Default Output Directory
+
+When `--output` is not provided:
+- **Single-file conversion**: output goes to `{source_parent}/{output_dir_name}/` (default `output_dir_name`: `Exports - Conversions`)
+- **Directory conversion**: output goes to `{traversed_directory_root}/{output_dir_name}/`
+- The output directory is **always relative to the source** — it is NEVER relative to the current working directory (CWD). Regardless of where the script is invoked from, the output location is determined solely by the source path.
+- The output directory is created **once per invocation**, not per source file.
+
+#### Directory Structure Mirroring
+
+When converting a directory tree, the output directory mirrors the subdirectory structure of the source tree:
+- Source files in subdirectories of the traversed root produce output in corresponding subdirectories within `{output_dir_name}/`.
+- The relative path from the traversed root to each source file is preserved in the output tree.
+- The `{assets_dir_name}/` directory (default: `md_embedded/`) lives alongside each `.md` file at whatever depth it appears — it is NOT a single shared directory at the output root.
+
+Example: converting `docs/` containing `docs/doc.doc`, `docs/pdf.pdf`, and `docs/deeper/pdftoo.pdf`:
+```
+docs/
+  doc.doc
+  pdf.pdf
+  deeper/pdftoo.pdf
+  Exports - Conversions/
+    doc.md
+    pdf.md
+    md_embedded/
+      pdf_0001.png
+    deeper/
+      pdftoo.md
+      md_embedded/
+        pdftoo_0001.png
+```
+
+The mirroring logic computes: `output_path = traversed_root / output_dir_name / relative_path_from_root.with_suffix(".md")`
+
+#### Skip-if-Newer Logic
+
+Before writing each output file, the writer checks timestamps:
+1. If the target `.md` file exists AND its `mtime` > source file's `mtime` → **skip** conversion, print informational message to stderr.
+2. If the target `.md` file exists AND its `mtime` ≤ source file's `mtime` → **overwrite**, print warning to stderr.
+3. If the target `.md` file does not exist → write normally.
+
+The decision is based **solely on filesystem modification timestamps** — no content or format validation of the existing file is performed.
+
+#### `--force` Flag
+
+When `--force` is set, the skip-if-newer check is bypassed entirely. All files are reconverted regardless of timestamps.
+
+#### Configurable Directory Names
+
+Both the output directory name and the assets subdirectory name are configurable:
+- **Default output directory name**: `Exports - Conversions`
+- **Default assets subdirectory name**: `md_embedded`
+- Values can be set via:
+  1. Configuration file (e.g. `pyproject.toml` or a dedicated config file)
+  2. Constructor parameters on the `Converter` class (`output_dir_name`, `assets_dir_name`)
+- **Precedence**: Constructor parameters > config file values > built-in defaults
 
 ### Error Reporter (`document2markdown/errors.py`)
 
@@ -283,7 +342,16 @@ The OO API is the preferred interface. The functional API is provided as a conve
 
 ```python
 class Converter:
-    def __init__(self, output_dir: Path | None = None, raster_dpi: int = RASTER_DPI, verbose: bool = False, renderer: BaseRenderer | None = None): ...
+    def __init__(
+        self,
+        output_dir: Path | None = None,
+        output_dir_name: str = "Exports - Conversions",
+        assets_dir_name: str = "md_embedded",
+        raster_dpi: int = RASTER_DPI,
+        force: bool = False,
+        verbose: bool = False,
+        renderer: BaseRenderer | None = None,
+    ): ...
     def convert(self, source_path: Path) -> Document: ...
 
 class Document:
@@ -291,12 +359,17 @@ class Document:
     def result(self) -> ConversionResult: ...
     @property
     def warnings(self) -> list[str]: ...
+    @property
+    def skipped(self) -> bool: ...  # True if skip-if-newer logic applied
     def to_markdown(self) -> str: ...  # uses renderer from parent Converter
     def save(self, output: Path | None = None) -> None: ...
 ```
 
 - `Converter` converts one file per call. For batch and directory convenience, use `document2markdown.utils`.
-- `Document.save()` with no argument writes to the same directory as the source file (matching CLI default behavior).
+- `output_dir_name` and `assets_dir_name` override config-file values when provided explicitly.
+- `force=True` bypasses skip-if-newer logic for all files processed by this instance.
+- `Document.save()` with no argument writes to the default output directory (`{output_dir_name}/` relative to the source file's parent).
+- `Document.skipped` is `True` when the output file was newer than the source and `force` was not set.
 - `doc2md.py` uses `Converter` via the utilities layer; it contains no duplicated pipeline logic.
 
 #### Functional API
@@ -323,11 +396,18 @@ def convert_batch(paths: list[Path], converter: Converter) -> list[tuple[Path, D
     """Convert a list of files. Returns one (path, Document|Exception) per input."""
 
 def convert_directory(directory: Path, converter: Converter, pattern: str = "*") -> list[tuple[Path, Document | Exception]]:
-    """Convert all matching files in a directory."""
+    """Convert all matching files in a directory tree, mirroring subdirectory structure in output."""
 ```
 
 - Each file is processed independently; failures are captured as exceptions in the result list rather than raised.
 - The CLI uses these functions for multi-file and directory support.
+- `convert_directory` computes the relative path of each source file from the traversed root (`directory`) and passes it to the writer so that the output mirrors the source tree structure. Specifically:
+  ```python
+  relative = source_path.relative_to(directory)
+  output_path = directory / output_dir_name / relative.with_suffix(".md")
+  assets_path = output_path.parent / assets_dir_name
+  ```
+  This ensures that `docs/deeper/pdftoo.pdf` produces `docs/Exports - Conversions/deeper/pdftoo.md` with assets at `docs/Exports - Conversions/deeper/md_embedded/`.
 
 ---
 
@@ -340,6 +420,7 @@ def convert_directory(directory: Path, converter: Converter, pattern: str = "*")
 class CLIArgs:
     files: list[Path]
     output: Path | None
+    force: bool
     verbose: bool
 ```
 
@@ -350,26 +431,55 @@ class CLIArgs:
 class BatchSummary:
     total: int
     succeeded: int
+    skipped: int
     failed: int
     errors: list[tuple[Path, str]]  # (file, reason)
 ```
 
 ### Embedded Asset Naming
 
-Given source file `Report Q1.docx` and output directory `out/`:
+**Single-file conversion** — given source file `Report Q1.docx` and default output directory name `Exports - Conversions` with default assets directory name `md_embedded`:
 
 ```
-out/
-  Report Q1.md
-  md_embedded/
-    Report Q1_0001.png
-    Report Q1_0002.png
+Source_Parent/
+  Report Q1.docx
+  Exports - Conversions/
+    Report Q1.md
+    md_embedded/
+      Report Q1_0001.png
+      Report Q1_0002.png
 ```
+
+**Directory conversion with mirroring** — given a directory `docs/` containing files at multiple depths:
+
+```
+docs/
+  doc.doc
+  pdf.pdf
+  deeper/
+    pdftoo.pdf
+  Exports - Conversions/
+    doc.md
+    pdf.md
+    md_embedded/
+      pdf_0001.png
+    deeper/
+      pdftoo.md
+      md_embedded/
+        pdftoo_0001.png
+```
+
+Key points:
+- The `md_embedded/` directory lives alongside each `.md` file at whatever depth it appears.
+- Each subdirectory gets its own `md_embedded/` — there is no single shared assets directory at the output root.
+- The output directory (`Exports - Conversions/`) is always at the traversed root, never relative to CWD.
 
 Paths in the Markdown use URL encoding:
 ```markdown
 ![chart](md_embedded/Report%20Q1_0001.png)
 ```
+
+Both `Exports - Conversions` and `md_embedded` are configurable via config file or constructor parameters.
 
 ---
 
@@ -411,7 +521,7 @@ Paths in the Markdown use URL encoding:
 
 *For any* source document containing embedded images, every image reference in the Markdown output SHALL be a relative path (not absolute) and SHALL be properly URL-encoded.
 
-**Validates: Requirements 3.7**
+**Validates: Requirements 3.11**
 
 ### Property 7: Batch mode processes all files independently
 
@@ -419,11 +529,11 @@ Paths in the Markdown use URL encoding:
 
 **Validates: Requirements 4.2, 4.3, 4.4, 5.3**
 
-### Property 8: Output path derivation
+### Property 8: Output path derivation with directory mirroring
 
-*For any* source document path and `--output` directory, the output `.md` file SHALL be written to `{output_dir}/{source_basename}.md`, preserving the base name exactly (no modification).
+*For any* source document path: when `--output` specifies a directory, the output `.md` file SHALL be written to `{output_dir}/{source_basename}.md`; when `--output` is not provided, the output SHALL be written to `{default_output_dir}/{relative_path}.md` where `default_output_dir` is `{traversed_root}/{output_dir_name}/` for directory conversion or `{source_parent}/{output_dir_name}/` for single-file conversion. For directory conversion, the relative path from the traversed root to the source file SHALL be preserved in the output tree (directory mirroring). The default output directory SHALL never be relative to the current working directory. The `{assets_dir_name}/` directory SHALL be placed alongside each `.md` file at its depth in the mirrored tree, not as a single shared directory at the output root.
 
-**Validates: Requirements 3.2, 3.8**
+**Validates: Requirements 3.2, 3.3, 3.4, 3.8, 3.9, 3.12, 3.13**
 
 ### Property 9: Vector graphics are extracted as SVG or PNG
 
@@ -439,6 +549,18 @@ Paths in the Markdown use URL encoding:
 
 **Validates: Requirements 7.2**
 
+### Property 11: Skip-if-newer timestamp logic
+
+*For any* source document and existing output file pair: when `--force` is not set and the output file's modification timestamp is strictly newer than the source file's modification timestamp, the converter SHALL skip conversion and print an informational message to stderr. When `--force` is set, the converter SHALL always proceed with conversion regardless of timestamps.
+
+**Validates: Requirements 3.4, 3.5, 3.6**
+
+### Property 12: Configurable directory names with precedence
+
+*For any* pair of directory name values (output_dir_name, assets_dir_name) provided via both a configuration file and constructor parameters, the converter SHALL use the constructor parameter values in all output paths. When only config file values are provided, those SHALL be used. When neither is provided, the built-in defaults (`Exports - Conversions`, `md_embedded`) SHALL be used.
+
+**Validates: Requirements 3.9, 3.10**
+
 ---
 
 ## Error Handling
@@ -452,7 +574,9 @@ Paths in the Markdown use URL encoding:
 | Permission denied | Log error to stderr (file + reason), continue batch |
 | Corrupt / unparseable file | Log error to stderr (file + reason), count as failure |
 | Output directory missing | Create directory tree before writing |
-| Output file already exists | Overwrite, print warning to stderr |
+| Output file exists and is newer than source | Skip conversion, print informational message to stderr (unless `--force`) |
+| Output file exists and is older/equal to source | Overwrite, print warning to stderr |
+| `--force` flag set | Bypass skip-if-newer check; always reconvert |
 | Embedded asset extraction failure | Log warning, insert `UnsupportedBlock` note in output |
 | Vector graphic conversion failure | Log warning, insert `UnsupportedBlock` note; do not write partial SVG |
 | Non-fatal parse warning | Collect in `ConversionResult.warnings`, print if `--verbose` |
@@ -474,10 +598,21 @@ Focus on specific behaviors and edge cases:
 - Each converter produces a non-empty `ConversionResult` for a valid sample file
 - `UnsupportedBlock` is emitted for unrenderable elements
 - Post-processor strips control characters and collapses blank lines
-- Output writer generates correct `md_embedded/` paths with URL encoding
+- Output writer generates correct `{assets_dir_name}/` paths with URL encoding
 - Batch summary counts are accurate for mixed success/failure runs
 - `--output` directory is created when it does not exist
-- Existing output file triggers a stderr warning
+- Default output directory (`Exports - Conversions/`) is created at the correct location for single-file and directory conversion modes
+- Default output directory is never relative to CWD — always relative to source path
+- Default output directory is created once per invocation, not per source file
+- Directory mirroring: source files in subdirectories produce output in corresponding subdirectories within `Exports - Conversions/`
+- Directory mirroring: `md_embedded/` is placed alongside each `.md` file at its depth, not shared at the output root
+- Directory mirroring: relative path from traversed root to source file is preserved in output tree
+- Skip-if-newer: output file with newer mtime than source → conversion skipped, informational message on stderr
+- Skip-if-newer: output file with older mtime than source → file overwritten, warning on stderr
+- Skip-if-newer: output file with equal mtime to source → file overwritten, warning on stderr
+- `--force` flag: conversion proceeds even when output is newer than source
+- Configurable `output_dir_name` and `assets_dir_name` via constructor parameters
+- Constructor parameters override config file values for directory names
 - Dispatcher selects the correct converter when extension and MIME agree
 - Dispatcher raises `MimeExtensionMismatchError` when extension and MIME disagree, with both type strings in the message
 - `VectorConverter` returns valid SVG bytes for a fixture EMF/WMF/EPS input
@@ -494,13 +629,15 @@ Using `hypothesis` (Python), minimum 100 iterations per property:
 - **Property 5** — Generate DOCX/HTML fixtures with headings at random levels 1–6; assert output contains the correct `#`-prefix count
 - **Property 6** — Generate documents with embedded images; assert all `![...]` references use relative, URL-encoded paths
 - **Property 7** — Generate batches of N paths where a random subset are invalid; assert summary totals equal N and succeeded + failed = N
-- **Property 8** — Generate random source paths and output directories; assert output path equals `{output_dir}/{stem}.md` exactly
+- **Property 8** — Generate random source paths (including nested subdirectories), output directories, and conversion modes (single-file vs directory); assert output path equals `{resolved_output_dir}/{relative_path}.md` where `resolved_output_dir` follows the default directory rules when `--output` is not provided; for directory mode, assert subdirectory structure is mirrored and `{assets_dir_name}/` is placed alongside each `.md` file at its depth; assert output is never relative to CWD
 - **Property 9** — Generate or fixture DOCX/PPTX documents with embedded EMF/WMF/EPS objects; assert EMF/WMF assets have extension `.svg` with valid XML `<svg` root, and EPS assets have extension `.png` with valid PNG header
 - **Property 10** — Generate (extension, MIME) pairs where extension maps to one supported format and MIME maps to a different supported format; assert dispatcher rejects the file, exits non-zero, and stderr contains both type identifiers
+- **Property 11** — Generate random (source_mtime, output_mtime, force_flag) triples; when `force=False` and `output_mtime > source_mtime`, assert conversion is skipped and stderr contains informational message; when `force=True`, assert conversion always proceeds regardless of timestamps
+- **Property 12** — Generate random (config_dir_name, constructor_dir_name) pairs for both output and assets directories; assert the constructor value is always used in output paths when provided, config value when only config is set, and built-in defaults otherwise
 
 Each test is tagged:
 ```python
-# Feature: document-to-markdown, Property 3: Output is valid UTF-8
+# Feature: document-to-markdown, Property 11: Skip-if-newer timestamp logic
 ```
 
 ### Integration Tests
@@ -511,3 +648,12 @@ Each test is tagged:
 - Verify a DOCX/PPTX containing an EMF/WMF graphic produces a `.svg` asset in `md_embedded/`
 - Verify batch summary output format on stdout
 - Verify that a file with a `.docx` extension but PDF magic bytes is rejected with a mismatch error on stderr
+- Verify default output directory (`Exports - Conversions/`) is created at the correct location for single-file conversion
+- Verify default output directory is created at the traversed root for directory conversion
+- Verify default output directory is never relative to CWD (run converter from a different directory than the source)
+- Verify directory mirroring: convert a directory with nested subdirectories, confirm output tree mirrors source tree structure
+- Verify directory mirroring: `md_embedded/` appears alongside each `.md` file at its depth, not as a shared directory at the output root
+- Verify directory mirroring: assets for `docs/deeper/pdftoo.pdf` appear at `docs/Exports - Conversions/deeper/md_embedded/pdftoo_0001.png`
+- Verify skip-if-newer: touch output file to be newer than source, run converter, confirm no overwrite and informational message on stderr
+- Verify `--force` overrides skip-if-newer: touch output file to be newer, run with `--force`, confirm file is reconverted
+- Verify custom `output_dir_name` and `assets_dir_name` via constructor produce output in the configured directories

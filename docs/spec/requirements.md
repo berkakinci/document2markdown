@@ -29,6 +29,7 @@ A Python command-line script that converts documents in various formats (PDF, DO
 4. WHEN a Source_Document with a `.pptx` extension is provided, THE Converter SHALL extract slide titles and body text in slide order and write a Markdown_Output file.
 5. WHEN a Source_Document with a `.txt` extension is provided, THE Converter SHALL wrap the content in a fenced code block or plain paragraphs and write a Markdown_Output file.
 6. IF a Source_Document has an unsupported file extension, THEN THE Converter SHALL exit with a non-zero status code and print a descriptive error message identifying the unsupported format.
+7. THE Converter SHALL exit with a non-zero status code whenever any error message is printed to stderr, regardless of whether the file format is supported.
 
 ---
 
@@ -58,12 +59,17 @@ A Python command-line script that converts documents in various formats (PDF, DO
 
 1. THE Converter SHALL accept a `--output` CLI argument specifying a target file path or directory for the Markdown_Output.
 2. WHEN `--output` specifies a directory, THE Converter SHALL write each Markdown_Output file into that directory using the Source_Document's base name with a `.md` extension.
-3. WHEN `--output` is not provided, THE Converter SHALL write the Markdown_Output file to the same directory as the Source_Document, using the Source_Document's base name with a `.md` extension.
-4. IF the target output file already exists, THEN THE Converter SHALL overwrite it and print a warning message to stderr.
-5. IF the target output directory does not exist, THEN THE Converter SHALL create it before writing the Markdown_Output file.
-6. WHEN the Source_Document contains embedded elements, THE Converter SHALL extract the embedded elements into a subdirectory at the same level as the Markdown_Output file.  The subdirectory should be named `md_embedded` and the extracted files should have the Source_Document's base name as a prefix.  The files should have an incrementing 4-digit serial number and appropriate extensions.
-7. IF the Markdown_Output has links and inline references to the extracted elements, THE Converter SHALL use relative paths in the links.  The links SHALL be URL Encoded.
-8. The Converter SHALL not modify file names, base names, or prefixes used in paths.  THE Converter SHALL use proper quoting to handle any spaces or special characters that may occurs on the filesystem.
+3. WHEN `--output` is not provided, THE Converter SHALL write all Markdown_Output files into a directory named `Exports - Conversions/` that is always relative to the source — specifically at the root of the traversed directory tree (for directory conversion) or as a sibling of the Source_Document (for single-file conversion).  The default output directory SHALL NOT be relative to the current working directory.  This directory SHALL be created once per invocation — not per source file.
+4. WHEN converting a directory tree, THE Converter SHALL mirror the subdirectory structure of the source tree within the output directory.  Source_Documents in subdirectories of the traversed root SHALL produce Markdown_Output files in corresponding subdirectories within `Exports - Conversions/`.  For example, converting `docs/` containing `docs/deeper/pdftoo.pdf` SHALL produce `docs/Exports - Conversions/deeper/pdftoo.md`.
+5. IF the target output file already exists and has a filesystem modification timestamp newer than the Source_Document's modification timestamp, THEN THE Converter SHALL skip conversion for that file and print an informational message to stderr indicating the file was skipped.  THE Converter SHALL base the skip decision solely on timestamps without validating the content or format of the existing target file.
+6. THE Converter SHALL accept a `--force` CLI flag that, WHEN enabled, causes THE Converter to reconvert all files regardless of modification timestamps.
+7. WHEN `--force` is not set and the target output file exists with a modification timestamp older than or equal to the Source_Document's modification timestamp, THE Converter SHALL overwrite the file and print a warning message to stderr.
+8. IF the target output directory does not exist, THEN THE Converter SHALL create it (including any necessary subdirectories) before writing the Markdown_Output file.
+9. WHEN the Source_Document contains embedded elements, THE Converter SHALL extract the embedded elements into a subdirectory named according to the configured assets directory name (default: `md_embedded`) located alongside the corresponding Markdown_Output file at whatever depth it appears in the mirrored directory structure.  The assets subdirectory SHALL NOT be a single shared directory at the output root.  The extracted files SHALL have the Source_Document's base name as a prefix with an incrementing 4-digit serial number and appropriate extensions.  For example, converting `docs/deeper/pdftoo.pdf` SHALL produce assets at `docs/Exports - Conversions/deeper/md_embedded/pdftoo_0001.png`.
+10. THE Converter SHALL support configuration of the default output directory name (default: `Exports - Conversions`) and the assets subdirectory name (default: `md_embedded`) via a configuration file and/or constructor parameters passed to the OO API.
+11. WHEN both a configuration file and constructor parameters specify directory names, THE constructor parameters SHALL take precedence over configuration file values.
+12. IF the Markdown_Output has links and inline references to the extracted elements, THE Converter SHALL use relative paths in the links.  The links SHALL be URL Encoded.
+13. THE Converter SHALL not modify file names, base names, or prefixes used in paths.  THE Converter SHALL use proper quoting to handle any spaces or special characters that may occur on the filesystem.
 
 ---
 
@@ -87,8 +93,8 @@ A Python command-line script that converts documents in various formats (PDF, DO
 
 #### Acceptance Criteria
 
-1. IF a Source_Document cannot be read due to a permissions error, THEN THE Converter SHALL print a descriptive error message to stderr identifying the file and the reason.
-2. IF a Source_Document is corrupt or cannot be parsed, THEN THE Converter SHALL print a descriptive error message to stderr identifying the file and exit with a non-zero status code for that file.
+1. IF a Source_Document cannot be read due to a permissions error, THEN THE Converter SHALL print a descriptive error message to stderr identifying the file and the reason, and SHALL exit with a non-zero status code.
+2. IF a Source_Document is corrupt or cannot be parsed, THEN THE Converter SHALL print a descriptive error message to stderr identifying the file and exit with a non-zero status code for that file.  IF the error message itself cannot be printed, THE Converter SHALL still exit with a non-zero status code.
 3. WHEN an error occurs for one file in Batch_Mode, THE Converter SHALL continue processing remaining files and include the failed file in the final summary.
 4. THE Converter SHALL support a `--verbose` CLI flag that, WHEN enabled, causes THE Converter to print progress information for each file being processed.
 
@@ -101,8 +107,8 @@ A Python command-line script that converts documents in various formats (PDF, DO
 #### Acceptance Criteria
 
 1. THE Converter SHALL produce Markdown_Output files encoded in UTF-8.
-2. THE Converter SHALL strip extraneous whitespace, repeated blank lines (more than two consecutive), and non-printable control characters from the Markdown_Output.
-3. WHEN a PDF Source_Document contains multi-column layout, THE Converter SHALL attempt to linearize the text into a single reading-order column.
+2. THE Converter SHALL strip extraneous whitespace, repeated blank lines (more than two consecutive), and non-printable control characters from the Markdown_Output.  Exceptions MAY be made for semantic spacing between major document sections where additional blank lines improve readability.
+3. WHEN processing any Source_Document, THE Converter SHALL linearize text into a consistent single reading-order column, regardless of whether the original layout is single-column or multi-column.
 4. THE Converter SHALL NOT include page numbers, headers, or footers extracted from PDF or DOCX files in the Markdown_Output.
 
 ---
@@ -116,7 +122,7 @@ A Python command-line script that converts documents in various formats (PDF, DO
 1. THE Converter SHALL determine the file type using the following detection methods:
    a. File extension (e.g. `.pdf`, `.docx`).
    b. MIME type via magic byte inspection (using `python-magic` / `libmagic`).
-2. IF file extension known, THE Converter SHALL verify the type determined by all detection methods match.  OTHERWISE, THE Converter SHALL treat the file as unsupported and also log an error to stderr identifying the file and the detected mismatching types.
+2. IF file extension is known, THE Converter SHALL verify the type determined by all detection methods match.  IF the types do not match, THE Converter SHALL treat the file as unsupported and log an error to stderr identifying the file and the detected mismatching types.
 3. IF the file type cannot be determined by any method, THE Converter SHALL treat the file as unsupported and follow the unsupported format error behavior (Requirement 1.6).
 
 ---
@@ -129,7 +135,7 @@ A Python command-line script that converts documents in various formats (PDF, DO
 
 1. THE core library API converts one file per call. `document2markdown.utils` provides convenience helpers for batch and directory use cases.
 2. THE public API SHALL provide a class-based interface that accepts configuration at instantiation and converts a single file.
-3. Conversion results SHALL be accessible as objects that expose the intermediate `ConversionResult`, the rendered string, and the ability to write output to disk.
+3. Conversion results SHALL be accessible as objects that expose the intermediate representation, the rendered string, and the ability to write output to disk.
 
 ---
 
@@ -140,9 +146,9 @@ A Python command-line script that converts documents in various formats (PDF, DO
 #### Acceptance Criteria
 
 1. THE `document2markdown` package SHALL be importable and usable without invoking the CLI.
-2. THE functional API SHALL expose the full conversion pipeline as convenience functions, returning both the intermediate `ConversionResult` and the final rendered string.
-3. WHEN called without an output path, THE API SHALL NOT write any files to disk.
-4. WHEN called with an output path, THE API SHALL write the Markdown output and embedded assets to disk following the same rules as the CLI (Requirement 3).
+2. THE functional API SHALL expose the full conversion pipeline as convenience functions, returning both the intermediate representation and the final rendered string.
+3. WHEN called without an output path, THE API SHALL NOT write any files to disk.  The API SHALL still return the intermediate representation and rendered string in memory.
+4. WHEN called with an output path, THE API SHALL write the Markdown output and embedded assets to disk following the same rules as the CLI (Requirement 3), but SHALL only write files when conversion succeeds and produces meaningful output.
 5. THE functional API SHALL delegate to the OO API internally rather than duplicating pipeline logic.
 6. THE `doc2md.py` CLI SHALL use the OO API internally rather than duplicating pipeline logic.
 7. THE package SHALL be installable as a standalone library via `pip install` using a `pyproject.toml`.

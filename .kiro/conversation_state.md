@@ -131,3 +131,9 @@ All under `tests/`:
 - 2026-05-10: pymupdf4llm added as hard dependency; layout module handles reading order, header/footer detection, image extraction, table extraction
 - 2026-05-10: 177 tests passing after refactor (removed 20 obsolete heuristic tests, updated integration tests for layout module)
 - 2026-05-10: Real-file validation: DDS tutorial (228K chars, 122 headings, 83 images), HP app note (46K chars, 41 headings, 26 images)
+- 2026-05-10: Updated document-to-markdown spec (requirements.md + design.md) — Requirement 3 Output Handling changes:
+  - Default output directory: `Exports - Conversions/` (always relative to source, never CWD)
+  - Directory structure mirroring: output tree mirrors source subdirectory structure; `md_embedded/` alongside each `.md` at its depth
+  - Skip-if-newer: skip conversion when output mtime > source mtime; `--force` flag overrides
+  - Configurable directory names: `output_dir_name` and `assets_dir_name` via config file or constructor params (constructor wins)
+  - Requirement 3 now has 13 acceptance criteria; design has 12 correctness properties
