@@ -5,7 +5,7 @@
 
 ## Status
 - Implementation complete — all 14 required tasks done, all optional test tasks done
-- 203 tests passing, 0 skipped
+- 205 tests passing (196 unit/property + 9 live), 0 failures
 - Overall source coverage: 85%
 - `converter_vector.py` at 100% coverage
 
@@ -17,8 +17,8 @@
 - Vector conversion chain:
   - EMF/WMF: Inkscape SVG → SVG (or PNG fallback) at configurable DPI
   - EPS: Pillow + Ghostscript (`gs`) → PNG (Inkscape 1.4+ on macOS cannot open EPS from CLI)
-- Inkscape path: auto-detected via `INKSCAPE_PATH` in `document2markdown/config.py` — checks PATH first, falls back to `/Applications/Inkscape.app/Contents/MacOS/inkscape`
-- Ghostscript (`gs`) must be on PATH for EPS support (install via `brew install ghostscript`)
+- Inkscape path: auto-detected via `_find_inkscape()` in `converter_vector.py` — checks PATH first, falls back to `INKSCAPE_FALLBACK` from `config.py`
+- Ghostscript path: auto-detected via `_find_gs()` in `converter_vector.py` — checks PATH first, falls back to `GS_FALLBACKS` from `config.py`
 - File type detection: extension + magic-byte cross-validation (must agree)
 - OO API (`Converter`, `Document`) is the preferred interface; functional API delegates to it
 - Core API converts one file per call; `document2markdown.utils` provides batch/directory helpers
@@ -57,75 +57,21 @@ All under `tests/`:
 - `test_property_vector.py` — Property 9 (mocked Inkscape SVG output)
 - `test_live_vector.py` — Live integration tests for EMF (Inkscape), WMF (Inkscape), EPS (Pillow+gs)
 
-## Session Handoff (2026-05-09) — TEMPORARY, clean up on resume
+## Remaining TODO
 
-### What we accomplished this session
-
-**1. Inkscape path resolution (config.py)**
-- Added `INKSCAPE_PATH` to `document2markdown/config.py`
-- Uses `shutil.which("inkscape")` first; falls back to `/Applications/Inkscape.app/Contents/MacOS/inkscape`
-- `converter_vector.py` updated throughout to use `INKSCAPE_PATH` instead of bare `"inkscape"` string
-- `_inkscape_available()` now checks `Path(INKSCAPE_PATH).is_file()` so the .app bundle is found without any PATH change
-
-**2. Live vector testing investigation**
-- Created `test_fixtures/` directory with:
-  - `test.emf`, `test.wmf`, `test.eps` — minimal programmatically-generated fixtures
-  - `art-nouveau-P3.emf`, `art-nouveau-P3.wmf`, `art-nouveau-P3.eps` — real-world fixtures exported from Inkscape's bundled examples (user-provided)
-- Discovered Inkscape 1.4.3 macOS CLI limitations:
-  - EMF: works perfectly via CLI ✓
-  - WMF: works with real files; our minimal test fixture was malformed (placeable header checksum issue)
-  - EPS: Inkscape CLI cannot open EPS on macOS regardless of version — pops a GUI dialog or fails silently
-- Installed Ghostscript 10.07.0 via `brew install ghostscript`
-- Confirmed Pillow 12.2.0 can open EPS via `Image.open()` which shells out to `gs` automatically
-
-**3. VectorConverter refactor (converter_vector.py)**
-- EPS now routed through `_try_pillow_eps_png()` → Pillow + gs → PNG
-- EMF/WMF stay on Inkscape → SVG (with PNG fallback)
-- Added `_ghostscript_available()` helper (checks `shutil.which("gs")`)
-- Added `_try_pillow_eps_png()` function
-- Updated module docstring to reflect new routing
-- Updated error message to mention both Inkscape (EMF/WMF) and gs+Pillow (EPS)
-- Added `Pillow` to `requirements.txt`
-
-**4. Test suite updates**
-- `tests/test_unit_vector.py` — appended new test classes:
-  - `TestTryPillowEpsPng` — unit tests for the new Pillow EPS helper
-  - `TestVectorConverterEPSRouting` — verifies EPS goes to Pillow, EMF/WMF go to Inkscape, never cross
-- `tests/test_live_vector.py` — fully rewritten:
-  - `TestLiveVectorEMF` — 3 tests using real Inkscape binary (skipped if absent)
-  - `TestLiveVectorWMF` — 2 tests using real Inkscape binary + art-nouveau-P3.wmf fixture
-  - `TestLiveVectorEPS` — 3 tests using Pillow+gs (skipped if gs absent); includes real fixture test
-  - `TestLiveVectorGarbageInput` — 1 test confirming garbage EMF raises VectorConversionError
-  - All xfail markers removed — everything passes cleanly now
-
-**5. Final test count: 203 passing, 0 failures**
-
-### Immediate TODO on resume
-
-1. **Review `test_unit_vector.py` — `TestTryPillowEpsPng.test_returns_png_bytes_on_success`**
-   - This test is a bit convoluted (mock layering got messy); it passes but should be simplified
-   - Consider replacing with a cleaner approach that directly patches `PIL.Image` at import time
+1. **Clean up `test_fixtures/`** — decide whether to keep in repo or add to `.gitignore`
+   - Binary fixtures (EMF, WMF) are small (40-60KB) and useful for live tests
+   - Could add a `conftest.py` fixture that skips live tests if `test_fixtures/` is absent
 
 2. **Coverage check** — run `pytest --cov` to see if the new Pillow EPS path is covered
    - `_try_pillow_eps_png` lines for the `Image.open()` success path may not be hit by unit tests
    - The live test covers it but live tests don't count toward coverage by default
 
-3. **Update `test_property_vector.py`** — Property 9 currently only mocks Inkscape SVG output
-   - Should add a property for EPS→PNG via mocked Pillow path
-
-4. **Consider adding `gs` path config** — similar to `INKSCAPE_PATH`, add `GS_PATH` to `document2markdown/config.py`
-   - Currently `_ghostscript_available()` only checks `shutil.which("gs")` — no fallback for non-PATH installs
-   - Homebrew installs to `/opt/homebrew/bin/gs` which should be on PATH, but worth making explicit
-
-5. **Clean up `test_fixtures/`** — decide whether to keep in repo or add to `.gitignore`
-   - Binary fixtures (EMF, WMF) are small (40-60KB) and useful for live tests
-   - Could add a `conftest.py` fixture that skips live tests if `test_fixtures/` is absent
-
-6. **Remaining coverage gaps** (pre-existing, not introduced this session):
+3. **Remaining coverage gaps** (diminishing returns — require real binary fixtures or live tools):
    - `converter_pdf.py` (79%), `converter_docx.py` (75%), `converter_pptx.py` (81%)
    - `renderer_base.py` (89%), `postprocess.py` (87%), `writer.py` (84%), `errors.py` (85%)
 
-### Environment notes
+## Environment notes
 - Must activate `conda activate document2markdown` before running tests
 - Run tests from project root: `python -m pytest tests/`
 - Inkscape: `/Applications/Inkscape.app/Contents/MacOS/inkscape` (v1.4.3)
@@ -158,3 +104,7 @@ All under `tests/`:
 - 2026-05-09: Added test_live_vector.py — 9 live tests covering EMF, WMF, EPS with real binaries; all pass
 - 2026-05-09: Added Pillow to requirements.txt; 203 tests passing, 0 failures
 - 2026-05-09: Reorganized into self-contained project directory; moved specs to `docs/spec/` with symlinks from `.kiro/specs/`
+- 2026-05-09: Simplified TestTryPillowEpsPng tests — replaced convoluted mock layering with clean sys.modules patching
+- 2026-05-09: Added Property 9b tests (EPS→PNG success + failure) to test_property_vector.py
+- 2026-05-09: Refactored config.py to be purely declarative (INKSCAPE_FALLBACK, GS_FALLBACKS); moved binary resolution logic to _find_inkscape()/_find_gs() in converter_vector.py
+- 2026-05-09: 205 tests passing (196 unit/property + 9 live), 0 failures

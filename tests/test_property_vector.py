@@ -84,3 +84,68 @@ def test_property9_vector_converter_returns_svg(
         pytest.fail(f"Output is not valid XML: {exc}")
 
     assert "svg" in root.tag.lower(), f"Root tag is not SVG: {root.tag!r}"
+
+
+# ---------------------------------------------------------------------------
+# Property 9b: EPS vector graphics are extracted as PNG via Pillow+Ghostscript
+#
+# The Pillow/Ghostscript path is mocked so the property exercises the full
+# VectorConverter EPS routing logic without requiring gs on PATH.
+# ---------------------------------------------------------------------------
+
+_eps_body = st.binary(min_size=0, max_size=200)
+_dpi = st.integers(min_value=72, max_value=600)
+
+# Minimal valid PNG: 8-byte signature + IHDR + IEND
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+
+
+def _fake_png_bytes(width: int = 1, height: int = 1) -> bytes:
+    """Return a minimal PNG-like byte sequence (signature + filler)."""
+    return _PNG_SIG + b"\x00" * 16
+
+
+# Feature: document-to-markdown, Property 9b: EPS vector graphics are extracted as PNG
+@given(body=_eps_body, dpi=_dpi)
+@settings(max_examples=100)
+def test_property9b_eps_converter_returns_png(body: bytes, dpi: int) -> None:
+    """VectorConverter returns (.png, bytes) for EPS input when Pillow succeeds.
+
+    The Pillow Image.open path is mocked to return fake PNG bytes, isolating
+    the property from Ghostscript while exercising the EPS routing, format
+    detection, and return-type contract.
+    """
+    fake_png = _fake_png_bytes()
+    vc = VectorConverter(raster_dpi=dpi)
+
+    mock_img = MagicMock()
+    mock_img.load.return_value = None
+
+    def fake_save(buf, format=None):
+        buf.write(fake_png)
+
+    mock_img.save.side_effect = fake_save
+
+    mock_image_mod = MagicMock()
+    mock_image_mod.open.return_value = mock_img
+
+    import sys
+    with patch("document2markdown.converter_vector._ghostscript_available", return_value=True), \
+         patch.dict(sys.modules, {"PIL": MagicMock(Image=mock_image_mod), "PIL.Image": mock_image_mod}):
+        output_bytes, ext = vc.convert(body, "eps")
+
+    assert ext == ".png", f"Expected .png, got {ext!r}"
+    assert output_bytes.startswith(_PNG_SIG), "Output does not start with PNG signature"
+    assert len(output_bytes) > len(_PNG_SIG), "Output is just the PNG signature with no data"
+
+
+# Feature: document-to-markdown, Property 9b: EPS raises VectorConversionError when Pillow fails
+@given(body=_eps_body)
+@settings(max_examples=100)
+def test_property9b_eps_converter_raises_on_failure(body: bytes) -> None:
+    """VectorConverter raises VectorConversionError for EPS when Pillow is unavailable."""
+    vc = VectorConverter()
+
+    with patch("document2markdown.converter_vector._try_pillow_eps_png", return_value=None):
+        with pytest.raises(VectorConversionError):
+            vc.convert(body, "eps")

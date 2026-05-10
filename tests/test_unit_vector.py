@@ -164,37 +164,31 @@ class TestTryPillowEpsPng:
             assert _try_pillow_eps_png(b"data", 300) is None
 
     def test_returns_none_when_pillow_not_installed(self):
+        import sys
         from unittest.mock import patch
-        import builtins
-        real_import = builtins.__import__
-
-        def mock_import(name, *args, **kwargs):
-            if name == "PIL":
-                raise ImportError("no PIL")
-            return real_import(name, *args, **kwargs)
-
         from document2markdown.converter_vector import _try_pillow_eps_png
+
+        # Remove PIL from sys.modules so the lazy import inside the function
+        # triggers a fresh ImportError via our fake finder.
         with patch("document2markdown.converter_vector._ghostscript_available", return_value=True):
-            with patch("builtins.__import__", side_effect=mock_import):
+            with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}):
                 assert _try_pillow_eps_png(b"data", 300) is None
 
     def test_returns_none_on_pillow_exception(self):
+        import sys
         from unittest.mock import patch, MagicMock
         from document2markdown.converter_vector import _try_pillow_eps_png
 
-        mock_image_module = MagicMock()
-        mock_image_module.Image.open.side_effect = Exception("gs failed")
+        # PIL.Image.open raises — function should catch and return None
+        mock_image = MagicMock()
+        mock_image.open.side_effect = Exception("gs failed")
 
         with patch("document2markdown.converter_vector._ghostscript_available", return_value=True):
-            with patch.dict("sys.modules", {"PIL": mock_image_module, "PIL.Image": mock_image_module.Image}):
-                with patch("document2markdown.converter_vector.__import__", create=True):
-                    # Patch at the function level via PIL import inside the function
-                    with patch("document2markdown.converter_vector._try_pillow_eps_png",
-                               wraps=_try_pillow_eps_png) as _:
-                        pass  # just ensure it's importable
+            with patch.dict(sys.modules, {"PIL": MagicMock(Image=mock_image), "PIL.Image": mock_image}):
+                assert _try_pillow_eps_png(b"data", 300) is None
 
     def test_returns_png_bytes_on_success(self):
-        import io
+        import sys
         from unittest.mock import patch, MagicMock
         from document2markdown.converter_vector import _try_pillow_eps_png
 
@@ -204,25 +198,15 @@ class TestTryPillowEpsPng:
         def fake_save(buf, format=None):
             buf.write(fake_png)
         mock_img.save.side_effect = fake_save
+        mock_img.load.return_value = None
 
-        mock_pil_image = MagicMock()
-        mock_pil_image.open.return_value = mock_img
+        mock_image = MagicMock()
+        mock_image.open.return_value = mock_img
 
         with patch("document2markdown.converter_vector._ghostscript_available", return_value=True):
-            with patch.dict("sys.modules", {"PIL": MagicMock(), "PIL.Image": mock_pil_image}):
-                with patch("document2markdown.converter_vector.Image", mock_pil_image, create=True):
-                    # Import the function fresh with patched PIL
-                    import importlib
-                    import document2markdown.converter_vector as cv_mod
-                    original_Image = getattr(cv_mod, "Image", None)
-                    # Directly test via a simpler mock approach
-                    pass
+            with patch.dict(sys.modules, {"PIL": MagicMock(Image=mock_image), "PIL.Image": mock_image}):
+                result = _try_pillow_eps_png(b"eps data", 300)
 
-        # Simpler: patch at the module attribute level
-        import document2markdown.converter_vector as cv_mod
-        with patch("document2markdown.converter_vector._ghostscript_available", return_value=True):
-            with patch.object(cv_mod, "_try_pillow_eps_png", return_value=fake_png):
-                result = cv_mod._try_pillow_eps_png(b"eps data", 300)
         assert result == fake_png
 
 

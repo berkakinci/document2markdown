@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from document2markdown.config import INKSCAPE_PATH, RASTER_DPI
+from document2markdown.config import GS_FALLBACKS, INKSCAPE_FALLBACK, RASTER_DPI
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +45,49 @@ class VectorConversionError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers — binary resolution
+# ---------------------------------------------------------------------------
+
+
+def _find_inkscape() -> str | None:
+    """Return the path to Inkscape, or None if not found."""
+    found = shutil.which("inkscape")
+    if found:
+        return found
+    if Path(INKSCAPE_FALLBACK).is_file():
+        return INKSCAPE_FALLBACK
+    return None
+
+
+def _find_gs() -> str | None:
+    """Return the path to Ghostscript (gs), or None if not found."""
+    found = shutil.which("gs")
+    if found:
+        return found
+    for fallback in GS_FALLBACKS:
+        if Path(fallback).is_file():
+            return fallback
+    return None
+
+
+def _inkscape_available() -> bool:
+    return _find_inkscape() is not None
+
+
+def _ghostscript_available() -> bool:
+    """Return True if Ghostscript is available (required by Pillow for EPS)."""
+    return _find_gs() is not None
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers — Inkscape (EMF / WMF)
 # ---------------------------------------------------------------------------
 
 
-def _inkscape_available() -> bool:
-    return Path(INKSCAPE_PATH).is_file() or shutil.which(INKSCAPE_PATH) is not None
-
-
 def _try_inkscape_svg(data: bytes, src_fmt: str) -> bytes | None:
     """Attempt SVG conversion via Inkscape shell call.  Returns SVG bytes or None."""
-    if not _inkscape_available():
+    inkscape = _find_inkscape()
+    if inkscape is None:
         return None
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -67,7 +99,7 @@ def _try_inkscape_svg(data: bytes, src_fmt: str) -> bytes | None:
         try:
             result = subprocess.run(
                 [
-                    INKSCAPE_PATH,
+                    inkscape,
                     str(in_file),
                     "--export-type=svg",
                     f"--export-filename={out_file}",
@@ -92,7 +124,8 @@ def _try_inkscape_svg(data: bytes, src_fmt: str) -> bytes | None:
 
 def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
     """Attempt PNG rasterization via Inkscape shell call.  Returns PNG bytes or None."""
-    if not _inkscape_available():
+    inkscape = _find_inkscape()
+    if inkscape is None:
         return None
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -104,7 +137,7 @@ def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
         try:
             result = subprocess.run(
                 [
-                    INKSCAPE_PATH,
+                    inkscape,
                     str(in_file),
                     "--export-type=png",
                     f"--export-dpi={dpi}",
@@ -131,11 +164,6 @@ def _try_inkscape_png(data: bytes, src_fmt: str, dpi: int) -> bytes | None:
 # ---------------------------------------------------------------------------
 # Internal helpers — Pillow / Ghostscript (EPS)
 # ---------------------------------------------------------------------------
-
-
-def _ghostscript_available() -> bool:
-    """Return True if ``gs`` is on PATH (required by Pillow for EPS)."""
-    return shutil.which("gs") is not None
 
 
 def _try_pillow_eps_png(data: bytes, dpi: int) -> bytes | None:
