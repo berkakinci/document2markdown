@@ -37,6 +37,7 @@ from document2markdown.document_model import (
     EmbeddedAsset,
     HeadingBlock,
     ImageBlock,
+    ListBlock,
     ParagraphBlock,
     TableBlock,
     UnsupportedBlock,
@@ -91,6 +92,11 @@ _MAX_VECTOR_PAGE_FRACTION: float = 0.6
 # Proximity threshold (points) for merging adjacent drawing bounding boxes
 # into a single vector cluster.
 _CLUSTER_PROXIMITY: float = 8.0
+
+# Minimum dimension (points) for a raster image to be extracted.
+# Images smaller than this in either width or height are skipped as
+# decorative elements (icons, bullets, spacers).  50pt ≈ 0.7 inches.
+_MIN_IMAGE_DIM: float = 50.0
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +212,70 @@ def _font_size_to_heading_level(size: float) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Bullet / numbered list detection
+# ---------------------------------------------------------------------------
+
+# Bullet characters that indicate an unordered list item.
+_BULLET_CHARS: set[str] = {"•", "●", "○", "■", "□", "▪", "▸", "▹", "‣", "⁃"}
+
+# Pattern for numbered list items: "1.", "2)", "(a)", etc.
+_NUMBERED_RE = re.compile(r"^(\d+[\.\)]\s|[\(\[]?\d+[\)\]]\s|\(?[a-z][\)\.])")
+
+
+def _extract_list_items(lines: list[str]) -> tuple[bool, list[str]] | None:
+    """Detect if *lines* form a bullet or numbered list.
+
+    Returns ``(ordered, items)`` if the block looks like a list, or ``None``
+    if it does not.  A block is considered a list if the majority of its
+    lines start with a bullet character or a numbered pattern.
+    """
+    if len(lines) < 2:
+        return None
+
+    bullet_count = 0
+    numbered_count = 0
+
+    for line in lines:
+        first_char = line[0] if line else ""
+        if first_char in _BULLET_CHARS:
+            bullet_count += 1
+        elif _NUMBERED_RE.match(line):
+            numbered_count += 1
+
+    total = len(lines)
+    # Require at least half the lines to be list items
+    if bullet_count >= total * 0.5:
+        # Unordered list — strip the bullet character from each item
+        items: list[str] = []
+        for line in lines:
+            if line and line[0] in _BULLET_CHARS:
+                items.append(line[1:].strip())
+            else:
+                # Non-bullet line: append to previous item if exists
+                if items:
+                    items[-1] += " " + line
+                else:
+                    items.append(line)
+        return (False, items)
+
+    if numbered_count >= total * 0.5:
+        # Ordered list — strip the number prefix from each item
+        items = []
+        for line in lines:
+            m = _NUMBERED_RE.match(line)
+            if m:
+                items.append(line[m.end():].strip())
+            else:
+                if items:
+                    items[-1] += " " + line
+                else:
+                    items.append(line)
+        return (True, items)
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Multi-column linearization
 # ---------------------------------------------------------------------------
 
@@ -269,6 +339,7 @@ class PDFConverter(BaseConverter):
 
     def __init__(self, raster_dpi: int = RASTER_DPI) -> None:
         self._raster_dpi = raster_dpi
+        self._body_font_size: float = 12.0  # updated per-document in convert()
 
     # ------------------------------------------------------------------
     # Public interface
@@ -289,6 +360,10 @@ class PDFConverter(BaseConverter):
             return ConversionResult(blocks=[], embedded=[], warnings=warnings)
 
         try:
+            # First pass: compute the document's median body font size so
+            # heading detection can use relative thresholds.
+            self._body_font_size = self._compute_body_font_size(doc)
+
             for page_num in range(len(doc)):
                 page = doc[page_num]
                 self._process_page(page, blocks, embedded, warnings)
@@ -296,6 +371,69 @@ class PDFConverter(BaseConverter):
             doc.close()
 
         return ConversionResult(blocks=blocks, embedded=embedded, warnings=warnings)
+
+    @staticmethod
+    def _compute_body_font_size(doc: fitz.Document) -> float:
+        """Estimate the dominant body font size across the document.
+
+        Collects font sizes weighted by character count and returns the mode
+        (most common size).  Falls back to 12.0 if no text is found.
+        """
+        size_counts: dict[float, int] = {}
+        # Sample up to 20 pages for performance on large documents.
+        sample_pages = min(len(doc), 20)
+        for page_num in range(sample_pages):
+            page = doc[page_num]
+            text_dict = page.get_text("dict")
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "")
+                        if not text.strip():
+                            continue
+                        size = round(span.get("size", 0), 1)
+                        if size > 0:
+                            size_counts[size] = size_counts.get(size, 0) + len(text)
+
+        if not size_counts:
+            return 12.0
+
+        # The body font size is the one with the most total characters.
+        return max(size_counts, key=size_counts.get)  # type: ignore[arg-type]
+
+    def _relative_heading_level(self, font_size: float) -> int | None:
+        """Determine heading level relative to the document's body font size.
+
+        A block is only considered a heading if its font size is significantly
+        larger than the body text.  This prevents presentation PDFs (where body
+        text is 24pt+) from classifying everything as headings.
+
+        Ratios:
+          >= 2.0x body → H1
+          >= 1.6x body → H2
+          >= 1.3x body → H3
+          >= 1.15x body → H4
+
+        Also requires the font to be bold for borderline cases (1.15-1.3x).
+        """
+        body = self._body_font_size
+        if body <= 0:
+            # Fallback to absolute thresholds
+            return _font_size_to_heading_level(font_size)
+
+        ratio = font_size / body
+
+        if ratio >= 2.0:
+            return 1
+        if ratio >= 1.6:
+            return 2
+        if ratio >= 1.3:
+            return 3
+        if ratio >= 1.15:
+            return 4
+        return None
 
     # ------------------------------------------------------------------
     # Per-page processing
@@ -504,9 +642,7 @@ class PDFConverter(BaseConverter):
         warnings: list[str],
     ) -> None:
         """Convert a PyMuPDF text block dict to one or more IR blocks."""
-        # Collect all text from the block.
-        # In rawdict mode PyMuPDF stores characters in the "chars" list and
-        # leaves span["text"] empty.  Fall back to joining chars when needed.
+        # Collect all text from the block, preserving line boundaries.
         lines_text: list[str] = []
         for line in block.get("lines", []):
             line_parts: list[str] = []
@@ -521,17 +657,25 @@ class PDFConverter(BaseConverter):
             if line_str:
                 lines_text.append(line_str)
 
-        full_text = " ".join(lines_text).strip()
-        if not full_text:
+        if not lines_text:
             return
 
-        # Skip page numbers
+        # Skip page numbers (check the joined text)
+        full_text = " ".join(lines_text).strip()
         if _is_page_number(full_text):
             return
 
-        # Determine if this block looks like a heading
+        # --- Detect bullet/numbered lists ---
+        # Check if lines start with bullet characters or numbered patterns.
+        bullet_items = _extract_list_items(lines_text)
+        if bullet_items is not None:
+            ordered, items = bullet_items
+            blocks.append(ListBlock(ordered=ordered, items=items))
+            return
+
+        # --- Heading or paragraph ---
         font_size = _dominant_font_size(block)
-        heading_level = _font_size_to_heading_level(font_size)
+        heading_level = self._relative_heading_level(font_size)
 
         if heading_level is not None:
             blocks.append(HeadingBlock(level=heading_level, text=full_text))
@@ -551,7 +695,14 @@ class PDFConverter(BaseConverter):
         warnings: list[str],
     ) -> None:
         """Extract a raster image from a PyMuPDF image block."""
-        # block["image"] contains the raw image bytes in rawdict mode
+        # Skip tiny images (icons, bullets, spacers, decorative elements).
+        bbox = block.get("bbox", (0, 0, 0, 0))
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if width < _MIN_IMAGE_DIM or height < _MIN_IMAGE_DIM:
+            return
+
+        # block["image"] contains the raw image bytes in dict mode
         image_data: bytes | None = block.get("image")
         if not image_data:
             # Fallback: try to get image via xref

@@ -51,7 +51,11 @@ class TestTextExtraction:
         assert text_blocks, "Expected at least one ParagraphBlock or HeadingBlock"
 
     def test_large_font_produces_heading(self, tmp_path):
-        p = _make_pdf(tmp_path, [((72, 200), "Big Title", 28)])
+        # Include body text so relative heading detection has a baseline.
+        p = _make_pdf(tmp_path, [
+            ((72, 200), "Big Title", 28),
+            ((72, 300), "This is body text at normal size for comparison.", 12),
+        ])
         result = PDFConverter().convert(p)
         headings = [b for b in result.blocks if isinstance(b, HeadingBlock)]
         assert headings, "Large font text should produce a HeadingBlock"
