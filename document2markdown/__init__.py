@@ -79,6 +79,7 @@ __all__ = [
 def convert_file(
     source_path: Path,
     output: Path | None = None,
+    force: bool = False,
     renderer: BaseRenderer | None = None,
 ) -> ConversionResult:
     """Run the full pipeline for *source_path*.
@@ -93,6 +94,8 @@ def convert_file(
     output:
         Destination directory (or file path) for the output.  When *None*,
         no files are written to disk.
+    force:
+        When *True*, bypass skip-if-newer logic and always write.
     renderer:
         Renderer to use.  Defaults to
         :class:`~document2markdown.renderer_base.MarkdownRenderer`.
@@ -102,7 +105,7 @@ def convert_file(
     ConversionResult
         The post-processed intermediate representation.
     """
-    converter = Converter(renderer=renderer)
+    converter = Converter(force=force, renderer=renderer)
     doc = converter.convert(Path(source_path))
     if output is not None:
         doc.save(Path(output))
