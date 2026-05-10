@@ -60,12 +60,17 @@ def _make_pptx(path: Path) -> None:
 
 
 def _make_pdf(path: Path) -> None:
-    """Write a minimal PDF file using PyMuPDF (fitz)."""
+    """Write a PDF file with enough content for pymupdf4llm layout analysis."""
     import fitz  # type: ignore[import]
 
     doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "Hello from PDF.", fontsize=12)
+    page = doc.new_page(width=595, height=842)
+    # Title-sized text so layout module has something to classify
+    page.insert_text((72, 80), "Integration Test Document", fontsize=20)
+    # Body paragraphs to give the layout module enough content
+    page.insert_text((72, 140), "This is the first paragraph of the document.", fontsize=12)
+    page.insert_text((72, 170), "This is the second paragraph with more text content.", fontsize=12)
+    page.insert_text((72, 200), "A third line ensures the layout module has enough to work with.", fontsize=12)
     doc.save(str(path))
     doc.close()
 

@@ -9,6 +9,7 @@ description = "Convert PDF, DOCX, HTML, PPTX, and TXT documents to Markdown"
 requires-python = ">=3.12"
 dependencies = [
     "PyMuPDF",
+    "pymupdf4llm",
     "python-docx",
     "beautifulsoup4",
     "markdownify",

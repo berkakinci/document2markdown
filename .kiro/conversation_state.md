@@ -1,20 +1,20 @@
 # Conversation State — document2markdown
 
 ## Session Info
-- Date: May 10, 2026
+- Date: May 10, 2026 (latest session)
 
 ## Status
-- Implementation complete — all 14 required tasks done, all optional test tasks done
-- 204 unit/property tests + 8 live tests passing, 0 failures
-- Overall source coverage: 85%
-- `converter_vector.py` at 100% coverage
-- PDF converter significantly improved via real-file testing (Tier 1 quality fixes applied)
+- Implementation complete — all 14 original tasks done, PDF converter refactored to pymupdf4llm
+- 200 unit/property tests passing, 0 failures (+ 9 live vector tests separate)
+- PDF converter: ~200 lines (down from ~760) — delegates to pymupdf4llm's layout module
+- Overall source coverage: TBD (needs re-run after refactor)
 
 ## Key Decisions
 - Module name: `document2markdown`
 - Project layout: `document2markdown/document2markdown/` (project dir / package dir — standard Python pattern)
 - Specs in `docs/spec/` with symlinks from `.kiro/specs/` for Kiro UI compatibility
-- PDF library: PyMuPDF (text via `get_text("dict")`, vectors via `get_pixmap(clip=bbox)`, drawings via `get_drawings()`)
+- PDF library: PyMuPDF via pymupdf4llm (layout analysis via `parse_document()`, heading levels via `IdentifyHeaders`, OCR auto-applied to scanned pages)
+- PDF converter: ~200 lines mapping LayoutBoxes to IR blocks (replaced ~750 lines of custom heuristics)
 - Vector conversion chain:
   - EMF/WMF: Inkscape SVG → SVG (or PNG fallback) at configurable DPI
   - EPS: Pillow + Ghostscript (`gs`) → PNG (Inkscape 1.4+ on macOS cannot open EPS from CLI)
@@ -46,19 +46,17 @@
 - Vector conversion: EMF/WMF require Inkscape on PATH (or macOS .app bundle); EPS requires Ghostscript (`gs`) on PATH + Pillow. Missing tools produce `UnsupportedBlock`.
 - PPTX title detection: only recognizes placeholder types 1/13/15 (TITLE/CENTER_TITLE/VERTICAL_TITLE). Real-world presentations often use free-form text boxes for titles — these come through as ParagraphBlock instead of HeadingBlock.
 
-## PDF Converter Issues (discovered via real-file testing, 2026-05-10)
+## PDF Converter (refactored 2026-05-10)
 
-1. ~~**Bullet list flattening**~~ — FIXED. `_extract_list_items()` detects bullet chars and numbered patterns at line boundaries, emits `ListBlock`.
-
-2. ~~**Heading heuristic too aggressive**~~ — FIXED. `_relative_heading_level()` uses document's dominant body font size as baseline; only text ≥1.15x body is classified as heading.
-
-3. ~~**Image explosion on presentation PDFs**~~ — FIXED. `_MIN_IMAGE_DIM = 50.0` skips images smaller than 50pt in either dimension.
-
-4. **Repeated page headers not filtered** — "Contains Nonbinding Recommendations" appears on every page of the FDA doc but isn't caught by the header/footer heuristic. Fix: detect repeated text that appears in the same position across multiple pages and suppress it.
-
-5. **Table extraction requires pandas** — `find_tables()` in PyMuPDF needs pandas. Not in requirements.txt/pyproject.toml. Fails silently with a warning per table. Fix: add pandas as optional dependency, or find alternative table extraction.
-
-6. **PyMuPDF stderr noise** — "Consider using pymupdf_layout" and "Package 'pandas' is not installed" messages leak to stdout/stderr from PyMuPDF internals. Fix: suppress or redirect PyMuPDF's internal logging.
+Replaced custom heuristics with pymupdf4llm:
+- Layout analysis: neural-network-based `parse_document()` classifies page regions
+- Heading levels: `IdentifyHeaders` maps font sizes to H1-H6
+- Images: extracted as PNG bytes from "picture" LayoutBoxes
+- Tables: extracted from `box.table["extract"]` (no pandas dependency needed)
+- Headers/footers: classified and skipped by the layout module
+- Reading order: handled by the layout module (no custom linearization)
+- OCR: auto-applied to scanned pages (Tesseract)
+- Tradeoff: ~2-3x slower per document (neural network + OCR) but more accurate
 
 ## Test Files
 All under `tests/`:
@@ -129,3 +127,7 @@ All under `tests/`:
 - 2026-05-10: Tier 1 PDF quality fixes — bullet list detection (`_extract_list_items`), relative heading sizing (`_relative_heading_level` + `_compute_body_font_size`), image dimension filter (`_MIN_IMAGE_DIM=50`)
 - 2026-05-10: Added .gitignore for test_real/, __pycache__, .coverage, .hypothesis, .pytest_cache
 - 2026-05-10: Real-file testing: 12+ files across PDF/DOCX/PPTX — all succeed, no crashes
+- 2026-05-10: Refactored converter_pdf.py to use pymupdf4llm (parse_document + IdentifyHeaders) — replaced ~750 lines of custom heuristics with ~200 lines of mapping code
+- 2026-05-10: pymupdf4llm added as hard dependency; layout module handles reading order, header/footer detection, image extraction, table extraction
+- 2026-05-10: 177 tests passing after refactor (removed 20 obsolete heuristic tests, updated integration tests for layout module)
+- 2026-05-10: Real-file validation: DDS tutorial (228K chars, 122 headings, 83 images), HP app note (46K chars, 41 headings, 26 images)
