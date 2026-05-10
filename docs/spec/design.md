@@ -24,14 +24,13 @@ The library pipeline handles one file at a time:
 flowchart TD
     Caller["Caller\n(Converter.convert / functional API)"]
     Caller --> Dispatcher["Format Dispatcher\nextension + magic-byte cross-validation"]
-    Dispatcher --> PDF["PDFConverter\nPyMuPDF"]
+    Dispatcher --> PDF["PDFConverter\npymupdf4llm"]
     Dispatcher --> DOCX["DOCXConverter\npython-docx"]
     Dispatcher --> HTML["HTMLConverter\nBeautifulSoup4"]
     Dispatcher --> PPTX["PPTXConverter\npython-pptx"]
     Dispatcher --> TXT["TXTConverter"]
     DOCX --> VEC["VectorConverter\nInkscape / raster"]
     PPTX --> VEC
-    PDF --> VEC
     PDF --> PostProc["Post-Processor\nwhitespace, linearization"]
     DOCX --> PostProc
     HTML --> PostProc
@@ -146,48 +145,11 @@ class BaseConverter(ABC):
 
 | Converter | Library | Notes |
 |-----------|---------|-------|
-| `PDFConverter` | `PyMuPDF` (recommended) | Extracts text blocks, tables, and images into IR. PyMuPDF is recommended over `pdfplumber` primarily due to vector graphic extraction: `page.get_drawings()` returns structured path data for both inline content-stream vectors and Form XObjects, and `page.get_svg_image(clip=rect)` can export any page region as SVG. `pdfplumber` does not expose this capability. PyMuPDF is also faster on complex/large PDFs. Tradeoff: AGPL license (vs. MIT for `pdfplumber`); acceptable for internal tooling. Neither library's Markdown output is used — all extraction feeds directly into the IR. |
+| `PDFConverter` | `pymupdf4llm` + `PyMuPDF` | Neural-network layout analysis via `parse_document()`; heading levels via `IdentifyHeaders`. See `pdf-pymupdf4llm-refactor` spec for details. |
 | `DOCXConverter` | `python-docx` + `Inkscape` | Walks document XML; maps styles to heading levels; converts embedded EMF/WMF drawing objects to SVG |
 | `HTMLConverter` | `BeautifulSoup4` + `markdownify` | Parses DOM; maps tags to Markdown equivalents |
 | `PPTXConverter` | `python-pptx` + `Inkscape` / `Pillow` | Iterates slides in order; title → H2, body → paragraphs; converts embedded EMF/WMF to SVG via Inkscape, EPS to PNG via Pillow+Ghostscript |
 | `TXTConverter` | stdlib only | Wraps content in fenced code block or plain paragraphs |
-
-### PDF Vector Detection and Extraction
-
-PDFs have no single "embedded vector object" model. Vector content appears in three forms:
-
-| Form | Description | Prevalence |
-|------|-------------|------------|
-| Inline path operators | Drawing commands (`m`, `l`, `c`, `re`, etc.) written directly into the page content stream. Charts from Office apps, diagrams, and figures typically land here when exported to PDF. | Very common |
-| Form XObjects | Reusable vector content blobs referenced via the page's `/Resources` → `/XObject` dictionary (subtype `/Form`). Common in programmatically generated PDFs (reports, invoices). | Moderate |
-| Embedded EPS/SVG files | Arbitrary files attached to the PDF. Mostly older scientific/academic documents. | Rare |
-
-The PDF object hierarchy (catalog → pages → resources → XObjects) can enumerate Form XObjects, but it misses inline path operators entirely — which are the majority of real-world vector content.
-
-`PyMuPDF` abstracts over both: `page.get_drawings()` returns structured path data regardless of whether the vector content is inline or in a Form XObject.
-
-**Extraction strategy in `PDFConverter`:**
-1. Call `page.get_drawings()` to get all vector path clusters on the page.
-2. Group spatially adjacent paths into logical figures using bounding-box clustering.
-3. Filter out clusters that are too small (`_MIN_VECTOR_AREA`) or too large (`_MAX_VECTOR_PAGE_FRACTION` — backgrounds/decorations).
-4. For each remaining cluster, rasterize to PNG via `page.get_pixmap(clip=bbox, matrix=scale_matrix)` at the configured DPI.
-5. Emit an `ImageBlock` referencing the extracted `EmbeddedAsset`.
-
-Note: `page.get_svg_image()` does not support a `clip` parameter in PyMuPDF 1.27. The full-page SVG includes all page content regardless of viewport, making it unsuitable for extracting individual vector regions. PNG rasterization at 300 DPI is the pragmatic choice.
-
-**Text extraction:**
-- Uses `page.get_text("dict")` to get span-level text with font metadata.
-- `"rawdict"` mode returns empty text in PyMuPDF 1.27 — do not use.
-
-**Heading detection:**
-- Uses relative font sizing: computes the document's dominant body font size (mode by character count) and classifies text as headings only when ≥1.15x the body size.
-- Absolute thresholds (`_font_size_to_heading_level`) retained as fallback when body size cannot be determined.
-
-**List detection:**
-- Lines starting with bullet characters (`•`, `●`, `○`, etc.) or numbered patterns (`1.`, `2)`) are detected and emitted as `ListBlock` items instead of being joined into a single paragraph.
-
-**Image filtering:**
-- Raster images smaller than `_MIN_IMAGE_DIM` (50pt) in either dimension are skipped as decorative elements.
 
 ### VectorConverter (`document2markdown/converter_vector.py`)
 
@@ -366,7 +328,7 @@ class Document:
     @property
     def skipped(self) -> bool: ...  # True if skip-if-newer logic applied
     def to_markdown(self) -> str: ...  # uses renderer from parent Converter
-    def save(self, output: Path | None = None) -> None: ...
+    def save(self, output: Path | None = None) -> Path: ...
 ```
 
 - `Converter` converts one file per call. For batch and directory convenience, use `document2markdown.utils`.
