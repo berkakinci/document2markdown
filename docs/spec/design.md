@@ -152,6 +152,7 @@ class BaseConverter(ABC):
 | `HTMLConverter` | `BeautifulSoup4` + `markdownify` | Parses DOM; maps tags to Markdown equivalents |
 | `PPTXConverter` | `python-pptx` + `Inkscape` / `Pillow` | Iterates slides in order; title → H2, body → paragraphs; converts embedded EMF/WMF to SVG via Inkscape, EPS to PNG via Pillow+Ghostscript |
 | `TXTConverter` | stdlib only | Wraps content in fenced code block or plain paragraphs |
+| `XLSXConverter` | `openpyxl` | Produces markdown index with CSV-per-sheet as linked assets; extracts embedded images; notes non-exportable charts |
 
 ### VectorConverter (`document2markdown/converter_vector.py`)
 
@@ -197,7 +198,7 @@ Block types (union / tagged):
 - `TableBlock(headers: list[str], rows: list[list[str]])`
 - `CodeBlock(language: str | None, text: str)`
 - `ImageBlock(asset_index: int, alt: str)`
-- `LinkBlock(text: str, url: str)`
+- `LinkBlock(text: str, url: str | None = None, asset_index: int | None = None)`
 - `UnsupportedBlock(description: str)`
 
 ### Post-Processor (`document2markdown/postprocess.py`)

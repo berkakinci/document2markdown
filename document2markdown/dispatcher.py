@@ -27,6 +27,7 @@ EXTENSION_TO_MIME: dict[str, str] = {
     ".htm":  "text/html",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".txt":  "text/plain",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
 # Set of all known MIME values (for reverse lookup)
@@ -40,6 +41,7 @@ def _get_converters() -> dict[str, type[BaseConverter]]:
     from document2markdown.converter_html import HTMLConverter
     from document2markdown.converter_pptx import PPTXConverter
     from document2markdown.converter_txt import TXTConverter
+    from document2markdown.converter_xlsx import XLSXConverter
 
     return {
         ".pdf":  PDFConverter,
@@ -48,6 +50,7 @@ def _get_converters() -> dict[str, type[BaseConverter]]:
         ".htm":  HTMLConverter,
         ".pptx": PPTXConverter,
         ".txt":  TXTConverter,
+        ".xlsx": XLSXConverter,
     }
 
 

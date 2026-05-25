@@ -7,3 +7,4 @@ python-pptx
 python-magic
 hypothesis
 Pillow
+openpyxl

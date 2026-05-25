@@ -26,8 +26,9 @@ Python CLI + library that converts PDF, DOCX, HTML, PPTX, and TXT into clean Mar
 3. `.html`/`.htm` → extract text + structure → `.md`
 4. `.pptx` → extract slide titles + body in slide order → `.md`
 5. `.txt` → wrap in fenced code block or plain paragraphs → `.md`
-6. Unsupported extension → non-zero exit + descriptive stderr message identifying the format
-7. Any stderr error message → non-zero exit code
+6. `.xlsx` → markdown index (H1 filename, H2 per sheet, CSV links, inline images, non-exportable chart notes) → `.md` + assets
+7. Unsupported extension → non-zero exit + descriptive stderr message identifying the format
+8. Any stderr error message → non-zero exit code
 
 ---
 

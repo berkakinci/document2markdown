@@ -157,4 +157,5 @@ All under `tests/`:
 - 2026-05-25: PDF OCR improvements — handle `table-fallback` boxclass (was silently dropped); `picture` boxes now emit text alongside image when textlines present; page-level `get_text()` fallback for pages where layout classifier produces no text blocks but OCR/native text exists
 - 2026-05-25: Skip-if-newer performance fix — timestamp check moved from `Document.save()` (post-conversion) to `convert_directory()` (pre-conversion). No-op runs now ~2s instead of 2+ minutes for 38 files.
 - 2026-05-25: Added openpyxl to conda env for ad-hoc xlsx→CSV; documented as known gap in README
+- 2026-05-25: Implemented XLSXConverter — markdown index with CSV-per-sheet as linked assets, embedded image extraction, non-exportable chart notes. Added LinkBlock.asset_index for renderer-resolved asset links. Updated dispatcher, renderer, requirements, design doc.
 - 2026-05-25: 208 tests passing, 0 failures

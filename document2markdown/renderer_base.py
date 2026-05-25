@@ -107,7 +107,7 @@ class MarkdownRenderer(BaseRenderer):
         if isinstance(block, ImageBlock):
             return self._render_image(block, result)
         if isinstance(block, LinkBlock):
-            return self._render_link(block)
+            return self._render_link(block, result)
         if isinstance(block, UnsupportedBlock):
             return self._render_unsupported(block)
         # Unknown block type — emit a comment so content is not silently lost
@@ -158,8 +158,13 @@ class MarkdownRenderer(BaseRenderer):
             path = f"md_embedded/asset_{block.asset_index:04d}"
         return f"![{alt}]({path})"
 
-    def _render_link(self, block: LinkBlock) -> str:
-        return f"[{block.text}]({block.url})"
+    def _render_link(self, block: LinkBlock, result: ConversionResult) -> str:
+        if block.asset_index is not None and block.asset_index < len(result.embedded):
+            asset = result.embedded[block.asset_index]
+            url = self._asset_path(block.asset_index, asset.extension)
+        else:
+            url = block.url or ""
+        return f"[{block.text}]({url})"
 
     def _render_unsupported(self, block: UnsupportedBlock) -> str:
         return f"<!-- unsupported: {block.description} -->"

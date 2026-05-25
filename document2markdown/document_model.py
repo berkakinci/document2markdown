@@ -75,9 +75,10 @@ class ImageBlock:
 
 @dataclass
 class LinkBlock:
-    """Inline hyperlink."""
+    """Inline hyperlink, optionally referencing an embedded asset."""
     text: str
-    url: str
+    url: str | None = None          # explicit URL (used as-is)
+    asset_index: int | None = None  # reference to EmbeddedAsset (resolved by renderer)
 
 
 @dataclass

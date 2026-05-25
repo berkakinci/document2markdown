@@ -49,5 +49,5 @@ def test_mismatch_raises_with_both_types():
 
 
 def test_extension_to_mime_has_all_formats():
-    expected = {".pdf", ".docx", ".html", ".htm", ".pptx", ".txt"}
+    expected = {".pdf", ".docx", ".html", ".htm", ".pptx", ".txt", ".xlsx"}
     assert expected == set(EXTENSION_TO_MIME.keys())

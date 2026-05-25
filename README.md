@@ -1,6 +1,6 @@
 # document2markdown
 
-Convert PDF, DOCX, HTML, PPTX, and TXT documents to clean Markdown.
+Convert PDF, DOCX, HTML, PPTX, XLSX, and TXT documents to clean Markdown.
 
 ## Install
 
@@ -85,21 +85,20 @@ Outputs `.md` files plus an `md_embedded/` folder for extracted images. Skips fi
 
 ## Supported formats
 
-| Extension | Library |
-|-----------|---------|
-| `.pdf` | PyMuPDF + pymupdf4llm |
-| `.docx` | python-docx |
-| `.html`, `.htm` | BeautifulSoup4 + markdownify |
-| `.pptx` | python-pptx |
-| `.txt` | stdlib |
+| Extension | Library | Output |
+|-----------|---------|--------|
+| `.pdf` | PyMuPDF + pymupdf4llm | Markdown (OCR via Tesseract for scanned pages) |
+| `.docx` | python-docx | Markdown |
+| `.html`, `.htm` | BeautifulSoup4 + markdownify | Markdown |
+| `.pptx` | python-pptx | Markdown |
+| `.xlsx` | openpyxl | Markdown index + CSV per sheet |
+| `.txt` | stdlib | Markdown |
 
 Vector images (EMF/WMF → SVG via Inkscape; EPS → PNG via Ghostscript+Pillow) are extracted automatically from DOCX/PPTX.
 
 ## Known gaps / future work
 
-- **`.xlsx` / `.xls`** — Not currently supported. Spreadsheets are filtered out alongside images and diagrams. `openpyxl` has been installed in the conda env (`document2markdown`) for ad-hoc conversion; native support would be straightforward to add.
 - **`.xml` (C-CDA / XHTML)** — `INDEX.HTM` files that are actually XHTML fail with a mime-type mismatch. Low priority since these are typically navigation boilerplate in IHE XDM exports.
-
-### Environment note
-
-`openpyxl` (3.1.5) was installed into the `document2markdown` conda env on 2026-05-25 for xlsx→CSV conversion. Not yet wired into the tool itself.
+- **`.xls`** (legacy binary Excel) — not supported. Only `.xlsx` (Open XML) is handled.
+- **XLSX charts** — stored as XML definitions, not rendered images. Cannot be exported without a rendering engine (e.g., LibreOffice headless).
+- **Large XLSX files** (>50MB / >100K rows) — standard openpyxl mode loads all cells into memory. Could be optimized with `read_only=True` for data-only sheets.
