@@ -560,7 +560,7 @@ class TestMapBoxesToBlocks:
         warnings: list[str] = []
 
         self.converter._map_boxes_to_blocks(
-            [boxes], header_map, blocks, embedded, warnings
+            None, [boxes], header_map, blocks, embedded, warnings
         )
 
         # Expected: HeadingBlock, Paragraph, Paragraph, ListBlock(2), Paragraph, ImageBlock, TableBlock
@@ -597,7 +597,7 @@ class TestMapBoxesToBlocks:
         warnings: list[str] = []
 
         self.converter._map_boxes_to_blocks(
-            [boxes], {}, blocks, embedded, warnings
+            None, [boxes], {}, blocks, embedded, warnings
         )
         assert blocks == []
 
@@ -612,7 +612,7 @@ class TestMapBoxesToBlocks:
         warnings: list[str] = []
 
         self.converter._map_boxes_to_blocks(
-            [boxes], {}, blocks, embedded, warnings
+            None, [boxes], {}, blocks, embedded, warnings
         )
         assert len(blocks) == 1
         assert isinstance(blocks[0], ListBlock)

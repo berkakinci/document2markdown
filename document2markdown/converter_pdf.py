@@ -3,8 +3,8 @@
 Uses pymupdf4llm's neural-network-based document layout analysis:
 
 * ``parse_document()`` classifies page content into typed LayoutBoxes
-  (title, section-header, text, list-item, picture, table, caption,
-  page-header, page-footer, footnote).
+  (title, section-header, text, list-item, picture, table, table-fallback,
+  caption, page-header, page-footer, footnote).
 * ``IdentifyHeaders`` assigns heading levels based on font-size analysis
   across the entire document.
 
@@ -14,8 +14,14 @@ Supported mappings:
 * text / caption / footnote → :class:`ParagraphBlock`
 * list-item (consecutive) → :class:`ListBlock`
 * picture                 → :class:`EmbeddedAsset` + :class:`ImageBlock`
+                            (plus :class:`ParagraphBlock` if textlines present)
 * table                   → :class:`TableBlock`
+* table-fallback          → :class:`ParagraphBlock` (text) + :class:`ImageBlock`
 * page-header / page-footer → *(skipped)*
+
+OCR fallback: for pages where no text-bearing blocks are produced from the
+layout boxes, the converter falls back to ``page.get_text()`` which contains
+OCR output injected by ``parse_document()``.
 """
 
 from __future__ import annotations
@@ -134,7 +140,7 @@ class PDFConverter(BaseConverter):
 
             # Map layout boxes to IR blocks.
             self._map_boxes_to_blocks(
-                pages_boxes, header_map, blocks, embedded, warnings
+                doc, pages_boxes, header_map, blocks, embedded, warnings
             )
         finally:
             doc.close()
@@ -175,6 +181,7 @@ class PDFConverter(BaseConverter):
 
     def _map_boxes_to_blocks(
         self,
+        doc: fitz.Document,
         pages_boxes: list[list],
         header_map: dict[float, int],
         blocks: list[Block],
@@ -186,10 +193,16 @@ class PDFConverter(BaseConverter):
         Iterates over per-page box lists, dispatching each box to the
         appropriate handler. Consecutive list-items are accumulated into
         a single ListBlock.
+
+        For pages where the layout classifier produced no text (only picture
+        boxes), falls back to page.get_text() which contains OCR output
+        injected by parse_document.
         """
         list_accumulator: list[str] = []
 
-        for page_boxes in pages_boxes:
+        for page_idx, page_boxes in enumerate(pages_boxes):
+            blocks_before = len(blocks)
+
             for box in page_boxes:
                 try:
                     # Skip page headers and footers
@@ -224,6 +237,31 @@ class PDFConverter(BaseConverter):
                 )
                 list_accumulator = []
 
+            # Check if any text-bearing blocks were added for this page
+            page_text_len = 0
+            for b in blocks[blocks_before:]:
+                if isinstance(b, ParagraphBlock):
+                    page_text_len += len(b.text)
+                elif isinstance(b, HeadingBlock):
+                    page_text_len += len(b.text)
+                elif isinstance(b, ListBlock):
+                    page_text_len += sum(len(item) for item in b.items)
+                elif isinstance(b, TableBlock):
+                    page_text_len += sum(
+                        len(cell) for row in b.rows for cell in row
+                    ) + sum(len(h) for h in b.headers)
+
+            # Fallback: if the page has substantially more text available
+            # (via native text layer or OCR injected by parse_document) than
+            # what was extracted from the layout boxes, append the full page
+            # text. This catches cases where the layout classifier puts text
+            # content into picture/footer boxes that we skip or can't extract.
+            if doc is not None and page_idx < len(doc):
+                page = doc[page_idx]
+                fallback_text = page.get_text().strip()
+                if fallback_text and len(fallback_text) > page_text_len * 2 + 50:
+                    blocks.append(ParagraphBlock(text=fallback_text))
+
     # ------------------------------------------------------------------
     # Single box dispatch
     # ------------------------------------------------------------------
@@ -257,6 +295,12 @@ class PDFConverter(BaseConverter):
                 list_accumulator.append(text)
 
         elif boxclass == "picture":
+            # For scanned/OCR'd pages, picture boxes may have textlines.
+            # Emit text if available (for searchability), plus the image
+            # (for human reference when OCR quality is poor).
+            text = self._extract_text_from_box(box)
+            if text:
+                blocks.append(ParagraphBlock(text=text))
             image_block = self._extract_image_from_box(box, embedded, warnings)
             if image_block is not None:
                 blocks.append(image_block)
@@ -265,6 +309,17 @@ class PDFConverter(BaseConverter):
             table_block = self._extract_table_from_box(box, warnings)
             if table_block is not None:
                 blocks.append(table_block)
+
+        elif boxclass == "table-fallback":
+            # table-fallback: layout detected table-like structure but couldn't
+            # parse it as a proper table. Emit text if available (for
+            # searchability), plus the image (for human reference).
+            text = self._extract_text_from_box(box)
+            if text:
+                blocks.append(ParagraphBlock(text=text))
+            image_block = self._extract_image_from_box(box, embedded, warnings)
+            if image_block is not None:
+                blocks.append(image_block)
 
     # ------------------------------------------------------------------
     # Heading level resolution
