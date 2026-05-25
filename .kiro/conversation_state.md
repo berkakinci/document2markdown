@@ -45,6 +45,8 @@
 - DOCX interrupted ordered lists: when a numbered list is split by a non-list paragraph (e.g. a note mid-procedure), the accumulator flushes and restarts numbering from 1. Fix requires threading `numId` from `numPr` through `_ListItem` to the accumulator so continuation can be detected and the count preserved. Common in technical documents.
 - Vector conversion: EMF/WMF require Inkscape on PATH (or macOS .app bundle); EPS requires Ghostscript (`gs`) on PATH + Pillow. Missing tools produce `UnsupportedBlock`.
 - PPTX title detection: only recognizes placeholder types 1/13/15 (TITLE/CENTER_TITLE/VERTICAL_TITLE). Real-world presentations often use free-form text boxes for titles — these come through as ParagraphBlock instead of HeadingBlock.
+- PDF OCR: pymupdf4llm runs Tesseract on image-only pages, but sometimes doesn't populate textlines on `picture` LayoutBoxes. Mitigated by page-level `get_text()` fallback, but some pages (where the layout classifier splits content into multiple picture boxes with partial text) may still have incomplete extraction.
+- PDF layout classification: pymupdf4llm may misclassify text regions as `page-footer` or absorb them into `picture` boxes. The page-text fallback compensates when extracted text is substantially less than available text.
 
 ## PDF Converter (refactored 2026-05-10)
 
@@ -152,3 +154,7 @@ All under `tests/`:
 - 2026-05-10: **document2markdown deemed ready for real conversions** — all testing complete, no blocking issues
 - 2026-05-10: Added top-level README.md covering OO, functional, and CLI usage; supported formats table
 - 2026-05-10: Multi-file mode experiment — confirmed no nested outputs; each source gets `Exports - Conversions/` alongside its parent directory (mixed-mode runs do scatter output dirs but never nest)
+- 2026-05-25: PDF OCR improvements — handle `table-fallback` boxclass (was silently dropped); `picture` boxes now emit text alongside image when textlines present; page-level `get_text()` fallback for pages where layout classifier produces no text blocks but OCR/native text exists
+- 2026-05-25: Skip-if-newer performance fix — timestamp check moved from `Document.save()` (post-conversion) to `convert_directory()` (pre-conversion). No-op runs now ~2s instead of 2+ minutes for 38 files.
+- 2026-05-25: Added openpyxl to conda env for ad-hoc xlsx→CSV; documented as known gap in README
+- 2026-05-25: 208 tests passing, 0 failures

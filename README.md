@@ -94,3 +94,12 @@ Outputs `.md` files plus an `md_embedded/` folder for extracted images. Skips fi
 | `.txt` | stdlib |
 
 Vector images (EMF/WMF → SVG via Inkscape; EPS → PNG via Ghostscript+Pillow) are extracted automatically from DOCX/PPTX.
+
+## Known gaps / future work
+
+- **`.xlsx` / `.xls`** — Not currently supported. Spreadsheets are filtered out alongside images and diagrams. `openpyxl` has been installed in the conda env (`document2markdown`) for ad-hoc conversion; native support would be straightforward to add.
+- **`.xml` (C-CDA / XHTML)** — `INDEX.HTM` files that are actually XHTML fail with a mime-type mismatch. Low priority since these are typically navigation boilerplate in IHE XDM exports.
+
+### Environment note
+
+`openpyxl` (3.1.5) was installed into the `document2markdown` conda env on 2026-05-25 for xlsx→CSV conversion. Not yet wired into the tool itself.
