@@ -8,6 +8,7 @@ Requirements: 4.1–4.5
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
@@ -89,12 +90,38 @@ def convert_directory(
     results: list[tuple[Path, Union[Document, Exception]]] = []
     for source_path in paths:
         try:
-            doc = converter.convert(source_path)
             # Compute mirrored output directory preserving subdirectory structure
             relative = source_path.relative_to(directory)
             output_dir = directory / OUTPUT_DIR_NAME / relative.parent
+            output_md = output_dir / (source_path.stem + ".md")
+
+            # Early skip: avoid expensive conversion when output is fresh.
+            # This check short-circuits before any parsing/OCR work happens.
+            if is_up_to_date(output_md, source_path, converter._force):
+                if converter._verbose:
+                    print(
+                        f"  Skipping (up-to-date): {source_path}",
+                        file=sys.stderr,
+                    )
+                results.append((source_path, None))  # type: ignore[arg-type]
+                continue
+
+            doc = converter.convert(source_path)
             doc.save(output=output_dir)
             results.append((source_path, doc))
         except Exception as exc:  # noqa: BLE001
             results.append((source_path, exc))
     return results
+
+
+def is_up_to_date(output_md: Path, source_path: Path, force: bool) -> bool:
+    """Return True if output is newer than source and force is not set.
+
+    Use this before expensive conversion work to short-circuit when the
+    output is already fresh.
+    """
+    if force:
+        return False
+    if not output_md.exists():
+        return False
+    return output_md.stat().st_mtime > source_path.stat().st_mtime

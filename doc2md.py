@@ -148,6 +148,9 @@ def _run(args: CLIArgs) -> BatchSummary:
             reason = str(outcome)
             summary.errors.append((path, reason))
             print(f"ERROR: {path}: {reason}", file=sys.stderr)
+        elif outcome is None:
+            # Skipped (skip-if-newer in directory mode)
+            summary.skipped += 1
         else:
             # outcome is a Document
             try:
@@ -161,13 +164,10 @@ def _run(args: CLIArgs) -> BatchSummary:
                     out_dir = _resolve_output_dir(args.output, path)
                     saved = outcome.save(out_dir)
                 else:
-                    # No --output, file(s) mode — Document.save() uses default
+                    # No --output, file(s) mode — always writes
                     saved = outcome.save()
 
-                if outcome.skipped:
-                    summary.skipped += 1
-                else:
-                    summary.succeeded += 1
+                summary.succeeded += 1
 
                 if args.verbose:
                     print(f"  -> {saved}")

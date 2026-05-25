@@ -40,9 +40,6 @@ class Document:
         Default output directory used by :meth:`save` when no *output*
         argument is supplied.  If *None*, :meth:`save` writes to
         ``{source_parent}/{OUTPUT_DIR_NAME}/``.
-    force:
-        When *True*, bypass skip-if-newer logic and always write output.
-        Passed through to :meth:`OutputWriter.write`.
     """
 
     def __init__(
@@ -51,14 +48,11 @@ class Document:
         result: ConversionResult,
         renderer: BaseRenderer | None = None,
         output_dir: Path | None = None,
-        force: bool = False,
     ) -> None:
         self._source_path = source_path
         self._result = result
         self._renderer = renderer
         self._output_dir = output_dir
-        self._force = force
-        self._skipped: bool = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -73,11 +67,6 @@ class Document:
     def warnings(self) -> list[str]:
         """Non-fatal warnings collected during conversion."""
         return list(self._result.warnings)
-
-    @property
-    def skipped(self) -> bool:
-        """True if skip-if-newer logic determined the output is up-to-date."""
-        return self._skipped
 
     # ------------------------------------------------------------------
     # Public methods
@@ -125,8 +114,4 @@ class Document:
         if out_dir is None:
             out_dir = self._source_path.parent / OUTPUT_DIR_NAME
         writer = OutputWriter(renderer=self._renderer)
-        md_path, skipped = writer.write(
-            self._result, self._source_path, out_dir, force=self._force
-        )
-        self._skipped = skipped
-        return md_path
+        return writer.write(self._result, self._source_path, out_dir)

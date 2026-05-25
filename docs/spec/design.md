@@ -52,16 +52,18 @@ The CLI is a thin layer over the library. It uses `document2markdown.utils` for 
 flowchart TD
     CLI["doc2md.py\nargparse\n(--output, --force, --verbose)"]
     CLI --> Utils["document2markdown.utils\nconvert_batch / convert_directory"]
-    Utils --> Conv["Converter\n(one file at a time)"]
-    Conv --> Skip{"Skip-if-newer?\n(unless --force)"}
-    Skip -->|No: proceed| Doc["Document"]
-    Skip -->|Yes: skip| Skipped["Document (skipped=True)"]
+    Utils --> Skip{"Skip-if-newer?\n(directory mode only,\nunless --force)"}
+    Skip -->|Skip| Skipped["None (skipped)"]
+    Skip -->|Convert| Conv["Converter\n(one file at a time)"]
+    Conv --> Doc["Document"]
     Doc --> Save["Document.save(output)"]
     Save --> FS[("Filesystem")]
     Utils --> Summary["BatchSummary\nstdout"]
 ```
 
 The CLI never touches the pipeline directly — it only orchestrates via the public API.
+Skip-if-newer logic lives in `convert_directory` (checked before conversion).
+File-list mode always converts and overwrites.
 
 ---
 
@@ -232,18 +234,9 @@ Serializes a rendered string and embedded assets to disk. The writer's interface
 - Writes embedded assets to `{output_dir}/{EMBEDDED_DIR}/{base_name}_{serial:04d}{ext}` — uses `EMBEDDED_DIR` constant from `config.py` directly (not passed as a parameter)
 - Generates URL-encoded relative paths for all image/link references
 - Creates output directories as needed (`mkdir(parents=True)`)
+- If target `.md` already exists → overwrite with stderr warning
 
-#### Skip-if-Newer Logic
-
-The writer's `write()` method accepts a `force: bool = False` parameter. Before writing each output file:
-1. If the target `.md` file exists AND its `mtime` > source file's `mtime` AND not `force` → **skip**, print informational message to stderr, return `(md_path, skipped=True)`.
-2. If the target `.md` file exists AND its `mtime` ≤ source file's `mtime` → **overwrite**, print warning to stderr (existing behavior).
-3. If the target `.md` file does not exist → write normally.
-4. If `force` is `True` → skip timestamp check entirely, always write.
-
-The decision is based **solely on filesystem modification timestamps** — no content or format validation of the existing file is performed.
-
-The `write()` return type changes from `Path` to `tuple[Path, bool]` — `(md_path, skipped)`.
+The writer is intentionally simple — it always writes when called. Skip-if-newer logic lives in the orchestration layer (`convert_directory` in `utils.py`), not in the writer.
 
 #### Default Output Directory (resolved by `Document.save()`)
 
@@ -325,17 +318,14 @@ class Document:
     def result(self) -> ConversionResult: ...
     @property
     def warnings(self) -> list[str]: ...
-    @property
-    def skipped(self) -> bool: ...  # True if skip-if-newer logic applied
     def to_markdown(self) -> str: ...  # uses renderer from parent Converter
     def save(self, output: Path | None = None) -> Path: ...
 ```
 
 - `Converter` converts one file per call. For batch and directory convenience, use `document2markdown.utils`.
-- `force=True` bypasses skip-if-newer logic for all files processed by this instance. Passed through to `Document` and then to `OutputWriter.write()`.
+- `force=True` bypasses skip-if-newer logic in directory mode (`convert_directory`). Has no effect in file-list mode (which always converts).
 - `output_dir` is an explicit output directory override. When set, `Document.save()` uses it directly (no default directory name logic).
 - `Document.save()` with no argument and no `output_dir` on the parent Converter writes to `{source_parent}/{OUTPUT_DIR_NAME}/` (reading `OUTPUT_DIR_NAME` from `config.py`).
-- `Document.skipped` is `True` when the output file was newer than the source and `force` was not set.
 - Directory name configuration (`OUTPUT_DIR_NAME`, `EMBEDDED_DIR`) lives in `config.py` constants, overridable via `pyproject.toml`. These are NOT passed as constructor parameters — the surgical approach keeps the Converter interface minimal.
 - `doc2md.py` uses `Converter` via the utilities layer; it contains no duplicated pipeline logic.
 
@@ -362,8 +352,10 @@ Thin wrappers over `Converter` for batch and directory use cases. The core libra
 def convert_batch(paths: list[Path], converter: Converter) -> list[tuple[Path, Document | Exception]]:
     """Convert a list of files. Returns one (path, Document|Exception) per input."""
 
-def convert_directory(directory: Path, converter: Converter, pattern: str = "*") -> list[tuple[Path, Document | Exception]]:
-    """Convert all matching files in a directory tree, mirroring subdirectory structure in output."""
+def convert_directory(directory: Path, converter: Converter, pattern: str = "*") -> list[tuple[Path, Document | None | Exception]]:
+    """Convert all matching files in a directory tree, mirroring subdirectory structure in output.
+    Performs skip-if-newer check before conversion (unless converter._force is True).
+    Returns None for skipped files."""
 ```
 
 - Each file is processed independently; failures are captured as exceptions in the result list rather than raised.
@@ -517,9 +509,9 @@ Both `Exports - Conversions` and `md_embedded` are configurable via config file 
 
 **Validates: Requirements 7.2**
 
-### Property 11: Skip-if-newer timestamp logic
+### Property 11: Skip-if-newer timestamp logic (directory mode)
 
-*For any* source document and existing output file pair: when `--force` is not set and the output file's modification timestamp is strictly newer than the source file's modification timestamp, the converter SHALL skip conversion and print an informational message to stderr. When `--force` is set, the converter SHALL always proceed with conversion regardless of timestamps.
+*For any* source document and existing output file pair in directory mode: when `--force` is not set and the output file's modification timestamp is strictly newer than the source file's modification timestamp, the converter SHALL skip conversion entirely (no parsing or OCR) and print an informational message to stderr. When `--force` is set, the converter SHALL always proceed with conversion regardless of timestamps. In file-list mode, conversion always proceeds (no skip-if-newer check).
 
 **Validates: Requirements 3.4, 3.5, 3.6**
 
@@ -542,9 +534,9 @@ Both `Exports - Conversions` and `md_embedded` are configurable via config file 
 | Permission denied | Log error to stderr (file + reason), continue batch |
 | Corrupt / unparseable file | Log error to stderr (file + reason), count as failure |
 | Output directory missing | Create directory tree before writing |
-| Output file exists and is newer than source | Skip conversion, print informational message to stderr (unless `--force`) |
-| Output file exists and is older/equal to source | Overwrite, print warning to stderr |
-| `--force` flag set | Bypass skip-if-newer check; always reconvert |
+| Output file exists and is newer than source (directory mode) | Skip conversion, print informational message to stderr (unless `--force`) |
+| Output file exists (file-list mode) | Overwrite, print warning to stderr |
+| `--force` flag set | Bypass skip-if-newer check in directory mode; always reconvert |
 | Embedded asset extraction failure | Log warning, insert `UnsupportedBlock` note in output |
 | Vector graphic conversion failure | Log warning, insert `UnsupportedBlock` note; do not write partial SVG |
 | Non-fatal parse warning | Collect in `ConversionResult.warnings`, print if `--verbose` |

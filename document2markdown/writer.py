@@ -44,9 +44,8 @@ class OutputWriter:
         result: ConversionResult,
         source_path: Path,
         output_dir: Path | None = None,
-        force: bool = False,
-    ) -> tuple[Path, bool]:
-        """Write *result* to disk and return the path and skip status.
+    ) -> Path:
+        """Write *result* to disk and return the output path.
 
         Parameters
         ----------
@@ -58,14 +57,11 @@ class OutputWriter:
         output_dir:
             Directory where the ``.md`` file (and ``md_embedded/`` sub-dir)
             will be written.  Defaults to the same directory as *source_path*.
-        force:
-            When *True*, bypass skip-if-newer logic and always write.
 
         Returns
         -------
-        tuple[Path, bool]
-            ``(md_path, skipped)`` — the path to the ``.md`` file and whether
-            the write was skipped because the target is already up-to-date.
+        Path
+            Path to the written ``.md`` file.
         """
         base_name = source_path.stem  # e.g. "Report Q1"
         if output_dir is None:
@@ -75,18 +71,6 @@ class OutputWriter:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         md_path = output_dir / f"{base_name}.md"
-
-        # Skip-if-newer check (only when not forcing)
-        if not force and md_path.exists():
-            target_mtime = md_path.stat().st_mtime
-            source_mtime = source_path.stat().st_mtime
-            if target_mtime > source_mtime:
-                # Target is newer than source — skip
-                print(
-                    f"INFO: {md_path}: up-to-date, skipping",
-                    file=sys.stderr,
-                )
-                return (md_path, True)
 
         # Write embedded assets first so the renderer can reference them
         self._write_assets(result, base_name, output_dir)
@@ -105,7 +89,7 @@ class OutputWriter:
             )
         md_path.write_text(markdown, encoding="utf-8")
 
-        return (md_path, False)
+        return md_path
 
     # ------------------------------------------------------------------
     # Internal helpers

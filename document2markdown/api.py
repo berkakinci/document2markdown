@@ -29,8 +29,7 @@ class Converter:
         DPI used when rasterizing vector graphics as a final fallback.
         Defaults to :data:`~document2markdown.config.RASTER_DPI` (300).
     force:
-        When *True*, bypass skip-if-newer logic and always reconvert.
-        Passed through to :class:`~document2markdown.document.Document`.
+        When *True*, skip-if-newer checks in directory mode are bypassed.
     verbose:
         When *True*, print per-file progress to stdout.
     renderer:
@@ -102,5 +101,4 @@ class Converter:
             result=processed,
             renderer=self._renderer,
             output_dir=self._output_dir,
-            force=self._force,
         )

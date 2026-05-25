@@ -103,10 +103,9 @@ class TestOutputWriter:
         src = tmp_path / "doc.txt"
         src.write_text("Hello")
         writer = OutputWriter()
-        md_path, skipped = writer.write(r, src, new_dir)
+        md_path = writer.write(r, src, new_dir)
         assert new_dir.exists()
         assert md_path.exists()
-        assert not skipped
 
     def test_overwrites_existing_file_warns_stderr(self, tmp_path, capsys):
         r = _result(ParagraphBlock(text="Hello"))
