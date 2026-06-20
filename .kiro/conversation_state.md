@@ -75,7 +75,9 @@ All under `tests/`:
 
 ## Remaining TODO
 
-1. **Coverage check** — run `pytest --cov` to see if the new Pillow EPS path is covered
+1. **Progress message timing** — verify that the "Converting: <filename>" message is emitted *before* conversion starts (not after). A 500-page PDF was first alphabetically in a directory run and produced no output for a long time, making it look hung. If the message is printed post-conversion or buffered, move/flush it to emit immediately on start.
+
+2. **Coverage check** — run `pytest --cov` to see if the new Pillow EPS path is covered
    - `_try_pillow_eps_png` lines for the `Image.open()` success path may not be hit by unit tests
    - The live test covers it but live tests don't count toward coverage by default
 
