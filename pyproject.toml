@@ -6,6 +6,7 @@ build-backend = "setuptools.backends.legacy:build"
 name = "document2markdown"
 version = "0.1.0"
 description = "Convert PDF, DOCX, HTML, PPTX, XLSX, and TXT documents to Markdown"
+license = {text = "MIT"}
 requires-python = ">=3.12"
 dependencies = [
     "PyMuPDF",
