@@ -71,7 +71,7 @@ def test_property9_vector_converter_returns_svg(
                 Path(arg.split("=", 1)[1]).write_bytes(data)
         return mock_result
 
-    with patch("document2markdown.converter_vector._inkscape_available", return_value=True), \
+    with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"), \
          patch("subprocess.run", side_effect=fake_inkscape):
         output_bytes, ext = vc.convert(data, "emf")
 

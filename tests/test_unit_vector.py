@@ -24,7 +24,7 @@ class TestTryInkscapeSvg:
     def test_returns_none_when_inkscape_not_available(self):
         from unittest.mock import patch
         from document2markdown.converter_vector import _try_inkscape_svg
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=False):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value=None):
             assert _try_inkscape_svg(b"data", "emf") is None
 
     def test_returns_none_on_nonzero_returncode(self):
@@ -33,14 +33,14 @@ class TestTryInkscapeSvg:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = b"error"
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", return_value=mock_result):
                 assert _try_inkscape_svg(b"data", "emf") is None
 
     def test_returns_none_on_timeout(self):
         from unittest.mock import patch
         from document2markdown.converter_vector import _try_inkscape_svg
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("inkscape", 60)):
                 assert _try_inkscape_svg(b"data", "emf") is None
 
@@ -58,7 +58,7 @@ class TestTryInkscapeSvg:
                     Path(arg.split("=", 1)[1]).write_bytes(fake_svg)
             return mock_result
 
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", side_effect=fake_run):
                 result = _try_inkscape_svg(b"data", "emf")
         assert result == fake_svg
@@ -72,13 +72,13 @@ class TestTryInkscapePng:
     def test_returns_none_when_inkscape_not_available(self):
         from unittest.mock import patch
         from document2markdown.converter_vector import _try_inkscape_png
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=False):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value=None):
             assert _try_inkscape_png(b"data", "emf", 150) is None
 
     def test_returns_none_on_oserror(self):
         from unittest.mock import patch
         from document2markdown.converter_vector import _try_inkscape_png
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", side_effect=OSError("no inkscape")):
                 assert _try_inkscape_png(b"data", "emf", 150) is None
 
@@ -88,14 +88,14 @@ class TestTryInkscapePng:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = b"error"
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", return_value=mock_result):
                 assert _try_inkscape_png(b"data", "emf", 150) is None
 
     def test_returns_none_on_timeout(self):
         from unittest.mock import patch
         from document2markdown.converter_vector import _try_inkscape_png
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("inkscape", 60)):
                 assert _try_inkscape_png(b"data", "emf", 150) is None
 
@@ -113,7 +113,7 @@ class TestTryInkscapePng:
                     Path(arg.split("=", 1)[1]).write_bytes(fake_png)
             return mock_result
 
-        with patch("document2markdown.converter_vector._inkscape_available", return_value=True):
+        with patch("document2markdown.converter_vector._find_inkscape", return_value="/usr/bin/inkscape"):
             with patch("subprocess.run", side_effect=fake_run):
                 result = _try_inkscape_png(b"data", "emf", 150)
         assert result == fake_png
