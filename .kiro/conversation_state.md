@@ -1,13 +1,12 @@
 # Conversation State — document2markdown
 
 ## Session Info
-- Date: May 10, 2026 (latest session)
+- Date: June 20, 2026 (latest session)
 
 ## Status
-- Implementation complete — all 14 original tasks done, PDF converter refactored to pymupdf4llm
-- 200 unit/property tests passing, 0 failures (+ 9 live vector tests separate)
-- PDF converter: ~200 lines (down from ~760) — delegates to pymupdf4llm's layout module
-- Overall source coverage: TBD (needs re-run after refactor)
+- Published to GitHub as `berkakinci/document2markdown` (public repo, git submodule in long_covid_research)
+- CI passing: 200/200 tests on GitHub Actions (Ubuntu 24.04, Python 3.12)
+- `test_real/` on disk locally, gitignored
 
 ## Key Decisions
 - Module name: `document2markdown`
@@ -27,7 +26,6 @@
 - CLI (`doc2md.py`) uses `utils` layer — never touches pipeline directly
 - File naming: `converter_*.py`, `renderer_base.py`, `document_model.py`
 - cairosvg removed — only handled SVG→SVG/PNG; cannot consume EMF/WMF/EPS which are the actual formats in DOCX/PPTX
-- Future: extract as standalone repo via `git filter-repo --path "Scripts and Utilities/document2markdown/"`; may become a submodule here
 
 ## Pending Work
 - Req 9.7 (pip installable) — manual verification only, not automatable
@@ -75,15 +73,11 @@ All under `tests/`:
 
 ## Remaining TODO
 
-1. **Progress message timing** — verify that the "Converting: <filename>" message is emitted *before* conversion starts (not after). A 500-page PDF was first alphabetically in a directory run and produced no output for a long time, making it look hung. If the message is printed post-conversion or buffered, move/flush it to emit immediately on start.
+1. **Progress message timing** — verify that the "Converting: <filename>" message is emitted *before* conversion starts (not after). A 500-page PDF was first alphabetically in a directory run and produced no output for a long time, making it look hung.
 
 2. **Coverage check** — run `pytest --cov` to see if the new Pillow EPS path is covered
    - `_try_pillow_eps_png` lines for the `Image.open()` success path may not be hit by unit tests
    - The live test covers it but live tests don't count toward coverage by default
-
-2. **Remaining coverage gaps** (diminishing returns — require real binary fixtures or live tools):
-   - `converter_pdf.py` (79%), `converter_docx.py` (75%), `converter_pptx.py` (81%)
-   - `renderer_base.py` (89%), `postprocess.py` (87%), `writer.py` (84%), `errors.py` (85%)
 
 ## Environment notes
 - Must activate `conda activate document2markdown` before running tests
@@ -135,29 +129,17 @@ All under `tests/`:
 - 2026-05-10: pymupdf4llm added as hard dependency; layout module handles reading order, header/footer detection, image extraction, table extraction
 - 2026-05-10: 177 tests passing after refactor (removed 20 obsolete heuristic tests, updated integration tests for layout module)
 - 2026-05-10: Real-file validation: DDS tutorial (228K chars, 122 headings, 83 images), HP app note (46K chars, 41 headings, 26 images)
-- 2026-05-10: Updated document-to-markdown spec (requirements.md + design.md) — Requirement 3 Output Handling changes:
-  - Default output directory: `Exports - Conversions/` (always relative to source, never CWD)
-  - Directory structure mirroring: output tree mirrors source subdirectory structure; `md_embedded/` alongside each `.md` at its depth
-  - Skip-if-newer: skip conversion when output mtime > source mtime; `--force` flag overrides
-  - Configurable directory names: `output_dir_name` and `assets_dir_name` via config file or constructor params (constructor wins)
-  - Requirement 3 now has 13 acceptance criteria; design has 12 correctness properties
+- 2026-05-10: Updated document-to-markdown spec (requirements.md + design.md) — Requirement 3 Output Handling changes: default output dir, directory mirroring, skip-if-newer, --force, configurable dir names
 - 2026-05-10: Output handling implementation complete (tasks 15–23): default dir, mirroring, skip-if-newer, --force, configurable via config.py constants
-- 2026-05-10: Removed toml config overhead — simplified to direct constant reads from config.py (toml version preserved in git stash)
-- 2026-05-10: Spec audit: fixed 9 deviations (stale PDF docs, return type, functional API force param, doubled ERROR prefix, requirements overconstraints)
+- 2026-05-10: Removed toml config overhead — simplified to direct constant reads from config.py
+- 2026-05-10: Spec audit: fixed 9 deviations
 - 2026-05-10: Real-file test on test_real/ (103 documents converted successfully across PDF/DOCX/PPTX)
 - 2026-05-10: Fixes from real-file run: line-buffered stdout, filter unsupported extensions in directory mode, deduplicated ERROR prefix in exceptions
-- 2026-05-10: Investigated nested `Exports - Conversions/Exports - Conversions/` in `test_real/` — suspected bug in `convert_directory`, but could not reproduce with current code
-- 2026-05-10: Created `test_real_subset/` (20 files: 9 PDF, 5 DOCX, 6 PPTX) + `test_real_subset_pristine/` backup for fast iterative testing
-- 2026-05-10: Expanded subset with deeper directory structure (Papers/Ken Must Reads/, Papers/QCM Patents/, Papers/RSI Examples/, Thesis/Pictures/, AVoIP next-gen vision/); `test_real_subset_pristinemore/` backup
-- 2026-05-10: Ran 3 scenarios on subset (first run, skip-if-newer, --force) — no nesting produced in any case; directory mirroring works at all depths
-- 2026-05-10: Added unsupported files (.xlsx, .svg, .drawio, .jpg, .png) to subset — correctly filtered out by `convert_directory`, no errors, no empty output dirs created
-- 2026-05-10: Edge case confirmed: filename with literal double quotes (`"full_case parallel_case", the Evil Twins of Verilog Synthesis.pdf`) converts cleanly, no escaping issues
-- 2026-05-10: Conclusion: nested output in `test_real/` was from earlier dev iteration (pre-extension-filter) or dirty invocation params; current implementation is correct
+- 2026-05-10: Investigated nested `Exports - Conversions/Exports - Conversions/` — could not reproduce; current implementation confirmed correct
+- 2026-05-10: Created `test_real_subset/` (20 files) + pristine backups for fast iterative testing; expanded with deeper directory structure
 - 2026-05-10: **document2markdown deemed ready for real conversions** — all testing complete, no blocking issues
-- 2026-05-10: Added top-level README.md covering OO, functional, and CLI usage; supported formats table
-- 2026-05-10: Multi-file mode experiment — confirmed no nested outputs; each source gets `Exports - Conversions/` alongside its parent directory (mixed-mode runs do scatter output dirs but never nest)
-- 2026-05-25: PDF OCR improvements — handle `table-fallback` boxclass (was silently dropped); `picture` boxes now emit text alongside image when textlines present; page-level `get_text()` fallback for pages where layout classifier produces no text blocks but OCR/native text exists
-- 2026-05-25: Skip-if-newer performance fix — timestamp check moved from `Document.save()` (post-conversion) to `convert_directory()` (pre-conversion). No-op runs now ~2s instead of 2+ minutes for 38 files.
-- 2026-05-25: Added openpyxl to conda env for ad-hoc xlsx→CSV; documented as known gap in README
-- 2026-05-25: Implemented XLSXConverter — markdown index with CSV-per-sheet as linked assets, embedded image extraction, non-exportable chart notes. Added LinkBlock.asset_index for renderer-resolved asset links. Updated dispatcher, renderer, requirements, design doc.
-- 2026-05-25: 208 tests passing, 0 failures
+- 2026-05-10: Added top-level README.md
+- 2026-05-25: PDF OCR improvements — handle `table-fallback` boxclass; `picture` boxes emit text when textlines present; page-level fallback added
+- 2026-05-25: Skip-if-newer performance fix — timestamp check moved to pre-conversion; no-op runs ~2s instead of 2+ minutes
+- 2026-05-25: Added openpyxl to conda env; implemented XLSXConverter (markdown index + CSV per sheet + images); 208 tests passing
+- 2026-06-20: Extracted to `berkakinci/document2markdown` via git filter-repo; wired as submodule in long_covid_research; split README/DEVELOPMENT.md; MIT license; GitHub Actions CI; fixed vector test mocks (_inkscape_available → _find_inkscape); CI passing 200/200; updated .gitignore (OS junk, backup files, venv)

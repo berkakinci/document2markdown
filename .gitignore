@@ -1,17 +1,29 @@
-# Test data (real documents for manual testing)
-test_real/
+# Common backup files
+\#*#
+*~
+*.bak
+~$*
 
-# Python
-__pycache__/
+# OS junk
+.DS_Store
+Thumbs.db
+._*
+.Spotlight-V100
+.Trashes
+
+# Build Products
+*.o
+__pycache__
 *.pyc
-*.pyo
 
-# Coverage
+# Coverage and testing
 .coverage
 htmlcov/
-
-# Hypothesis
 .hypothesis/
-
-# pytest
 .pytest_cache/
+
+# Virtual environments
+.venv
+
+# Test data (real documents for manual testing)
+test_real/
